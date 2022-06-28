@@ -8,11 +8,6 @@ def fuzzy_autocomplete(query: str, choices):
     return [value[0] for value in results]
 
 
-# def fuzzy_find(query, choices):
-#     result = process.extractOne(query, choices, scorer=fuzz.WRatio, score_cutoff=70)
-#     return result[0] if result is not None else None
-
-
 async def fuzzy_find_obj(query, db_query):
     obj = await db_query.find_one({'name': query})
     if obj is None:  # user gave us incorrect or incomplete name
@@ -23,6 +18,5 @@ async def fuzzy_find_obj(query, db_query):
         if result is None:
             raise ValueError(f"Can't find {query}!")
 
-        obj = result[1]
-
+        obj = result[2]
     return obj

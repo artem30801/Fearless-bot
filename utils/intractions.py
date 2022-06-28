@@ -1,5 +1,4 @@
 import naff
-import asyncio
 
 
 async def yes_no(ctx: naff.InteractionContext, content: str, **kwargs):

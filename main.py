@@ -8,9 +8,11 @@ from logging.handlers import TimedRotatingFileHandler
 import naff
 import beanie
 import jurigged
+from naff import InteractionContext
 from motor import motor_asyncio
 
 from config import load_settings
+from utils.exceptions import BotError, HandledError, send_error
 
 logger = logging.getLogger()
 
@@ -57,9 +59,19 @@ class Bot(naff.Client):
         await beanie.init_beanie(database=self.db.fearless, document_models=self.models)
         await self.astart(self.config.discord_token)
 
+    async def on_command_error(self, ctx: InteractionContext, error: Exception, *args, **kwargs):
+        if isinstance(error, HandledError):
+            pass
+        elif isinstance(error, BotError):
+            await send_error(ctx, str(error))
+        else:
+            await super().on_command_error(ctx, error, *args, **kwargs)
+
 
 def main():
     config = load_settings()
+    if config.debug:
+        jurigged.watch()
 
     current_dir = Path(__file__).parent
 
@@ -93,5 +105,4 @@ def main():
 
 
 if __name__ == "__main__":
-    jurigged.watch()
     main()

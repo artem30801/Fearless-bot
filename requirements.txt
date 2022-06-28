@@ -1,4 +1,4 @@
-naff
+naff[orjson]
 beanie
 dynaconf
 rapidfuzz
