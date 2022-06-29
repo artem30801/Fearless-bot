@@ -25,6 +25,9 @@ class Actor(Document):
     async def get_by_member(cls, member: naff.Member):
         return await cls.find_one({'user_id': member.id})
 
+    async def member(self, guild: naff.Guild) -> naff.Member | None:
+        return await guild.fetch_member(self.user_id)
+
     async def user(self, ctx: InteractionContext) -> naff.User:
         user = None
         if ctx.guild:
@@ -45,7 +48,7 @@ class Actor(Document):
 
 
 class CharacterGrade(enum.IntEnum):
-    primary = 1
+    main = 1
     secondary = 2
     tertiary = 3
 

@@ -1,3 +1,4 @@
+import logging
 import naff
 from naff import SlashCommandChoice, subcommand, slash_str_option, slash_user_option, slash_bool_option, \
     slash_int_option
@@ -11,8 +12,18 @@ from utils.commands import manage, generic_rename
 
 from extensions.character_models import Actor, Character, CharacterGrade
 
+logger = logging.getLogger(__name__)
+
 character_cmd = manage.group("character")
 character_grades = [SlashCommandChoice(item.name.title(), item.value) for item in CharacterGrade]
+
+grade_roles = {
+    0: "Awaiting casting",
+    1: "Main Character",
+    2: "Secondary Character",
+    3: "Tertiary Character",
+}
+role_grades = {value: key for key, value in grade_roles.items()}
 
 
 class CharacterCmd(naff.Extension):
@@ -42,7 +53,9 @@ class CharacterCmd(naff.Extension):
         """Removes a character"""
         await ctx.defer(ephemeral=True)
         character_obj = await Character.fuzzy_find(character)
+        actor = await character_obj.actor.fetch()
         await character_obj.delete()
+        await self.enforce_roles(ctx.guild, actor)
 
         embed = naff.Embed(color=naff.MaterialColors.DEEP_ORANGE)
         embed.description = f"Removed character '**{character_obj.name}**'!"
@@ -83,7 +96,8 @@ class CharacterCmd(naff.Extension):
         old_grade = character_obj.grade
         character_obj.grade = grade
         await character_obj.save()
-        await ctx.send()
+        actor = await character_obj.actor.fetch()
+        await self.enforce_roles(ctx.guild, actor)
 
         embed = naff.Embed()
         if old_grade == character_obj.grade:
@@ -120,6 +134,8 @@ class CharacterCmd(naff.Extension):
                 actor = await Actor.get_or_insert(member)
                 character_obj = Character(name=character, actor=actor)
                 character_obj = await character_obj.insert()
+                await self.enforce_roles(ctx.guild, actor)
+
                 embed = naff.Embed(description="Done!", color=naff.MaterialColors.GREEN)
                 await btn_ctx.edit_origin(embed=embed, components=[])
 
@@ -159,6 +175,7 @@ class CharacterCmd(naff.Extension):
             actor = await Actor.get_or_insert(member)
             character_obj.actor = actor
             await character_obj.save()
+            await self.enforce_roles(ctx.guild, actor)
 
             embed = naff.Embed(description="Done!", color=naff.MaterialColors.GREEN)
             if not ctx.responded:
@@ -188,8 +205,10 @@ class CharacterCmd(naff.Extension):
             raise InvalidArgument(f"Character '**{character}**' is already free and without an actor :(")
 
         old_member_mention = await character_obj.actor.mention(ctx)
+        actor = character_obj.actor
         character_obj.actor = None
         await character_obj.save()
+        await self.enforce_roles(ctx.guild, actor)
 
         embed = naff.Embed(color=naff.MaterialColors.DEEP_ORANGE)
         embed.description = f"Removed {old_member_mention} as an actor for the character {character}"
@@ -291,6 +310,58 @@ class CharacterCmd(naff.Extension):
         characters = [character.name for character in character_list]
         results = fuzzy_autocomplete(query, characters)
         await ctx.send(results)
+
+    @classmethod
+    async def enforce_roles(cls, guild: naff.Guild, actor: Actor):
+        member = await actor.member(guild)
+        if member is None:
+            return
+
+        current = {role_grades.get(role.name) for role in member.roles}
+        current.discard(None)
+
+        characters = await Character.find({"actor.$id": actor.id}).to_list()
+        grades = set(character.grade.value for character in characters)
+        if not grades:
+            grades = {0}
+
+        to_remove = current.difference(grades)
+        to_add = grades.difference(current)
+
+        all_grades = to_add.union(to_remove)
+
+        async def get_role(grade: int):
+            role_name = grade_roles[grade]
+            try:
+                return await cls.get_role(guild, role_name)
+            except naff.errors.Forbidden as e:
+                logger.warning(f"Could not get/create role `{role_name}` in {guild}: {e}")
+                print(e)
+                return None
+
+        roles = {grade: await get_role(grade) for grade in all_grades}
+        roles = {grade: role for grade, role in roles.items() if role is not None}
+
+        print(roles)
+        for grade in to_remove:
+            print("REMOVE", grade)
+            if grade in roles:
+                print("REMOVE+", grade)
+                await member.remove_role(roles[grade], "Automatically removed to match assigned characters")
+
+        for grade in to_add:
+            print("ADD", grade)
+            if grade in roles:
+                print("ADD+", grade)
+                await member.add_role(roles[grade], "Automatically added to match assigned characters")
+
+    @staticmethod
+    async def get_role(guild: naff.Guild, role_name: str) -> naff.Role:
+        for role in guild.roles:
+            if role.name == role_name:
+                return role
+
+        return await guild.create_role(name=role_name)
 
 
 def setup(bot):
