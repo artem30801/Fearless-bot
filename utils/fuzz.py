@@ -1,19 +1,28 @@
 from rapidfuzz import fuzz, process
+# from rapidfuzz.distance.Levenshtein import normalized_similarity
+from rapidfuzz.distance.JaroWinkler import similarity
+from beanie.odm.queries.find import FindMany
+from copy import deepcopy
+# def scorer(s1, s2, **kwargs):
+#     return normalized_distance()
 
 
-def fuzzy_autocomplete(query: str, choices):
-    if not query.strip():
+def fuzzy_autocomplete(query: str, choices, flatten=True):
+    if not query.strip() and flatten:
         return choices[:25]
-    results = process.extract(query, choices, scorer=fuzz.WRatio, limit=25, score_cutoff=50)
-    return [value[0] for value in results]
+    results = process.extract(query, choices, scorer=fuzz.WRatio, limit=25, score_cutoff=0)
+    if flatten:
+        return [value[0] for value in results]
+    return results
 
 
-async def fuzzy_find_obj(query, db_query):
-    obj = await db_query.find_one({'name': query})
+async def fuzzy_find_obj(query: str, db_query: FindMany):
+    query = query.replace("_", " ")
+    obj = await deepcopy(db_query).find({'name': query}).first_or_none()
     if obj is None:  # user gave us incorrect or incomplete name
-        obj_choices = await db_query.find().to_list()
+        obj_choices = await deepcopy(db_query).find().to_list()
         obj_choices = {o: o.name for o in obj_choices}
-        result = process.extractOne(query, obj_choices, scorer=fuzz.WRatio, score_cutoff=70)
+        result = process.extractOne(query, obj_choices, scorer=fuzz.WRatio, score_cutoff=50)
 
         if result is None:
             raise ValueError(f"Can't find {query}!")
