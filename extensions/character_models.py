@@ -88,15 +88,13 @@ class Chapter(Document):
             raise InvalidArgument(f"Chapter '**{self.name}**' already exists!")
 
         # validate number
-        if self.number is None:
-            self.number = await get_new_number(cls.all())
-        await ensure_number_ordering(cls.all(), self.number)
+        self.number = await get_new_number(self, cls.all())
+        await reshuffle_numbers(cls.all(), self.number, self)
 
     @beanie.after_event(beanie.Delete)
     async def on_delete(self):
         cls = self.__class__
-        print("SHUFFLE", self)
-        await reshuffle_numbers(cls.all(), self.number)
+        await reshuffle_numbers(cls.all(), self.number-1)
 
     @classmethod
     async def fuzzy_find(cls, query: str) -> "Chapter":
@@ -105,6 +103,7 @@ class Chapter(Document):
         except ValueError:
             raise InvalidArgument(f"Chapter with name'**{query}**' not found!")
 
+    @property
     def scenes(self):
         return Scene.find({"chapter.$id": self.id})
 
@@ -130,15 +129,12 @@ class Scene(Document):
             raise InvalidArgument(f"Scene '**{self.name}**' already exists!")
 
         # validate number
-        if self.number is None:
-            self.number = await get_new_number(self.in_chapter(self.chapter_id))
-        await ensure_number_ordering(self.in_chapter(self.chapter_id), self.number)
+        self.number = await get_new_number(self, self.in_chapter(self.chapter_id))
+        await reshuffle_numbers(self.in_chapter(self.chapter_id), self.number, self)
 
     @beanie.after_event(beanie.Delete)
     async def on_delete(self):
-        cls = self.__class__
-        print("SHUFFLE", self)
-        await reshuffle_numbers(self.in_chapter(self.chapter_id), self.number)
+        await reshuffle_numbers(self.in_chapter(self.chapter_id), self.number-1)
 
     @classmethod
     def in_chapter(cls, chapter_id):

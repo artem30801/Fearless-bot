@@ -7,7 +7,7 @@ from utils.text import make_table
 from utils.fuzz import fuzzy_autocomplete
 from utils.intractions import yes_no
 from utils.exceptions import InvalidArgument
-from utils.commands import manage
+from utils.commands import manage, generic_rename
 
 from extensions.character_models import Actor, Character, CharacterGrade
 
@@ -28,7 +28,10 @@ class CharacterCmd(naff.Extension):
         await ctx.defer(ephemeral=True)
         character_obj = Character(name=name, grade=grade)
         await character_obj.insert()
-        await ctx.send(f"Created *{character_obj.grade.name.title()}* character '**{character_obj.name}**'!")
+
+        embed = naff.Embed(color=naff.MaterialColors.GREEN)
+        embed.description = f"Created *{character_obj.grade.name.title()}* character '**{character_obj.name}**'!"
+        await ctx.send(embed=embed)
 
     @character_cmd.subcommand("remove")
     async def character_remove(
@@ -40,7 +43,10 @@ class CharacterCmd(naff.Extension):
         await ctx.defer(ephemeral=True)
         character_obj = await Character.fuzzy_find(character)
         await character_obj.delete()
-        await ctx.send(f"Removed character '**{character_obj.name}**'!")
+
+        embed = naff.Embed(color=naff.MaterialColors.DEEP_ORANGE)
+        embed.description = f"Removed character '**{character_obj.name}**'!"
+        await ctx.send(embed=embed)
 
     @character_remove.autocomplete("character")
     async def character_remove_autocomplete(self, ctx: AutocompleteContext, character: str, **_):
@@ -56,10 +62,12 @@ class CharacterCmd(naff.Extension):
         """Renames a character"""
         await ctx.defer(ephemeral=True)
         character_obj = await Character.fuzzy_find(character)
-        old_name = character_obj.name
-        character_obj.name = new_name
-        await character_obj.save()
-        await ctx.send(f"Renamed character '**{old_name}**' to '**{character_obj.name}**'!")
+        embed = await generic_rename(ctx, character_obj, "character", new_name)
+        await ctx.send(embed=embed)
+
+    @character_rename.autocomplete("character")
+    async def character_rename_autocomplete(self, ctx: AutocompleteContext, character: str, **_):
+        return await self.character_autocomplete(ctx, character)
 
     @character_cmd.subcommand("set_grade")
     async def character_set_grade(
@@ -69,14 +77,23 @@ class CharacterCmd(naff.Extension):
             grade: slash_int_option("new grade for the character", required=False,
                                     choices=character_grades) = CharacterGrade.secondary,
     ):
-        """Changes a character's grade (Primary, Secondary, Tertiaryry)"""
+        """Changes a character's grade (Primary, Secondary, Tertiary)"""
         await ctx.defer(ephemeral=True)
         character_obj = await Character.fuzzy_find(character)
         old_grade = character_obj.grade
         character_obj.grade = grade
         await character_obj.save()
-        await ctx.send(f"Changed grade of the character '**{character_obj.name}**' "
-                       f"from *{old_grade.name.title()}* to *{character_obj.grade.name.title()}*!")
+        await ctx.send()
+
+        embed = naff.Embed()
+        if old_grade == character_obj.grade:
+            embed.color = naff.MaterialColors.PURPLE
+            embed.description = f"Grade of the character '**{character_obj.name}**' did not change (*{character_obj.grade.name.title()}*)"
+        else:
+            embed.color = naff.MaterialColors.INDIGO
+            embed.description = f"Changed grade of the character '**{character_obj.name}**' " \
+                                f"from *{old_grade.name.title()}* to *{character_obj.grade.name.title()}*!"
+        await ctx.send(embed=embed)
 
     @character_set_grade.autocomplete("character")
     async def character_set_grade_autocomplete(self, ctx: AutocompleteContext, character: str, **_):
@@ -96,20 +113,22 @@ class CharacterCmd(naff.Extension):
         except InvalidArgument:
             result, btn_ctx = await yes_no(
                 ctx,
-                f"This character does not exist yet. "
+                f"This character does not exist yet.\n"
                 f"Do you wish to create *Secondary* character '**{character}**'?",
             )
             if result:
                 actor = await Actor.get_or_insert(member)
                 character_obj = Character(name=character, actor=actor)
                 character_obj = await character_obj.insert()
-                await btn_ctx.edit_origin("Done!", components=[])
-                await ctx.channel.send(
-                    f"Created character '**{character_obj.name}**' and assigned to {member.mention}! 🎉",
-                    allowed_mentions=naff.AllowedMentions.none(),
-                )
+                embed = naff.Embed(description="Done!", color=naff.MaterialColors.GREEN)
+                await btn_ctx.edit_origin(embed=embed, components=[])
+
+                embed = naff.Embed(color=naff.MaterialColors.GREEN)
+                embed.description = f"Created character '**{character_obj.name}**' and assigned to {member.mention}! 🎉"
+                await ctx.channel.send(embed=embed)
             else:
-                await btn_ctx.edit_origin(f"Ok, aborted :(", components=[])
+                embed = naff.Embed(description="Ok, aborted ;(", color=naff.MaterialColors.RED)
+                await btn_ctx.edit_origin(embed=embed, components=[])
         else:
             await character_obj.fetch_all_links()
             if character_obj.actor is not None:
@@ -127,19 +146,29 @@ class CharacterCmd(naff.Extension):
                 )
 
                 if result:
+                    color = naff.MaterialColors.INDIGO
                     msg = f"Replaced {old_member_mention} with {member.mention} as an actor for character '**{character}**'"
                 else:
-                    await btn_ctx.edit_origin(f"Ok, aborted ;(", components=[])
+                    embed = naff.Embed(description="Ok, aborted ;(", color=naff.MaterialColors.RED)
+                    await btn_ctx.edit_origin(embed=embed, components=[])
                     return
             else:
+                color = naff.MaterialColors.GREEN
                 msg = f"Assigned character '**{character_obj.name}**' to {member.mention}! 🎉"
 
             actor = await Actor.get_or_insert(member)
             character_obj.actor = actor
             await character_obj.save()
 
-            await ctx.send("Done!")
-            await ctx.channel.send(msg, allowed_mentions=naff.AllowedMentions.none())
+            embed = naff.Embed(description="Done!", color=naff.MaterialColors.GREEN)
+            if not ctx.responded:
+                await ctx.send(embed=embed)
+            else:
+                # noinspection PyUnboundLocalVariable
+                await btn_ctx.edit_origin(embed=embed, components=[])
+
+            embed = naff.Embed(description=msg, color=color)
+            await ctx.channel.send(embed=embed)
 
     @character_assign.autocomplete("character")
     async def character_assign_autocomplete(self, ctx: AutocompleteContext, character: str, **_):
@@ -158,16 +187,17 @@ class CharacterCmd(naff.Extension):
         if character_obj.actor is None:
             raise InvalidArgument(f"Character '**{character}**' is already free and without an actor :(")
 
-        old_member_mention = character_obj.actor.mention(ctx)
+        old_member_mention = await character_obj.actor.mention(ctx)
         character_obj.actor = None
         await character_obj.save()
-        await ctx.send(f"Removed {old_member_mention} as an actor for the character {character}",
-                       allowed_mentions=naff.AllowedMentions.none(),
-                       )
+
+        embed = naff.Embed(color=naff.MaterialColors.DEEP_ORANGE)
+        embed.description = f"Removed {old_member_mention} as an actor for the character {character}"
+        await ctx.send(embed=embed)
 
     @character_free.autocomplete("character")
     async def character_free_autocomplete(self, ctx: AutocompleteContext, character: str, **_):
-        return await self.character_autocomplete(ctx, character)
+        return await self.character_autocomplete(ctx, character, free=False)
 
     @subcommand(base="list", name="characters")
     async def character_list(
@@ -253,8 +283,11 @@ class CharacterCmd(naff.Extension):
         )
 
     @classmethod
-    async def character_autocomplete(cls, ctx: AutocompleteContext, query: str):
-        character_list = await Character.all().to_list()
+    async def character_autocomplete(cls, ctx: AutocompleteContext, query: str, free=None):
+        db_query = Character.all()
+        if free is False:
+            db_query.find({"actor": {"$ne": None}})
+        character_list = await db_query.sort("+grade", "+name").to_list()
         characters = [character.name for character in character_list]
         results = fuzzy_autocomplete(query, characters)
         await ctx.send(results)

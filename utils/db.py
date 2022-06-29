@@ -19,10 +19,10 @@ class Document(BeanieDocument):
         validate_all = True
 
 
-async def get_new_number(query, number=None):
-    number = number if number is not None else float('inf')
+async def get_new_number(instance, query):
+    number = instance.number if instance.number is not None else float('inf')
     number = max(number, 1)
-    max_number = await deepcopy(query).max("number") or 0
+    max_number = await deepcopy(query).find({"_id": {"$ne": instance.id}}).max("number") or 0
     number = min(number, max_number + 1)
     return number
 
@@ -40,11 +40,11 @@ async def reshuffle_numbers(query, number, exclude_instance=None):
     query = query.sort("+number")
 
     async for instance in query:
-        print(instance)
-        instance.number = number
-        await instance.save()
+        print("BEFORE", instance)
         number += 1
-        print(instance)
+        instance.number = number
+        await instance.save(skip_actions=["validate_db"])
+        print("AFTER", instance)
 
 
 def validate_name(value: str):

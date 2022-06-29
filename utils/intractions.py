@@ -5,8 +5,9 @@ async def yes_no(ctx: naff.InteractionContext, content: str, **kwargs):
     no = naff.Button(style=naff.ButtonStyles.RED, label="No")
     yes = naff.Button(style=naff.ButtonStyles.GREEN, label="Yes")
     components = [no, yes]
+    embed = naff.Embed(description=content, color=naff.MaterialColors.AMBER)
     await ctx.send(
-        content,
+        embed=embed,
         components=components,
         **kwargs
     )

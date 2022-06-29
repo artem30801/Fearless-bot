@@ -18,7 +18,9 @@ class InvalidArgument(BotError):
 
 async def send_error(ctx: naff.Context, msg: str):
     if not ctx.responded:
-        await ctx.send(msg[:2000], allowed_mentions=naff.AllowedMentions.none(), ephemeral=True)
+        embed = naff.Embed(color=naff.MaterialColors.RED)
+        embed.description = msg[:2000]
+        await ctx.send(embed=embed, allowed_mentions=naff.AllowedMentions.none(), ephemeral=True)
     else:
         logging.warning(f"Already responded to message, error message: {msg}")
 
