@@ -8,13 +8,13 @@ from utils.text import make_table
 from utils.fuzz import fuzzy_autocomplete
 from utils.intractions import yes_no
 from utils.exceptions import InvalidArgument
-from utils.commands import manage, generic_rename
+from utils.commands import manage_cmd, list_cmd, generic_rename
 
 from extensions.character_models import Actor, Character, CharacterGrade
 
 logger = logging.getLogger(__name__)
 
-character_cmd = manage.group("character")
+character_cmd = manage_cmd.group("character")
 character_grades = [SlashCommandChoice(item.name.title(), item.value) for item in CharacterGrade]
 
 grade_roles = {
@@ -75,7 +75,7 @@ class CharacterCmd(naff.Extension):
         """Renames a character"""
         await ctx.defer(ephemeral=True)
         character_obj = await Character.fuzzy_find(character)
-        embed = await generic_rename(ctx, character_obj, "character", new_name)
+        embed = await generic_rename(character_obj, "character", new_name)
         await ctx.send(embed=embed)
 
     @character_rename.autocomplete("character")
@@ -218,7 +218,7 @@ class CharacterCmd(naff.Extension):
     async def character_free_autocomplete(self, ctx: AutocompleteContext, character: str, **_):
         return await self.character_autocomplete(ctx, character, free=False)
 
-    @subcommand(base="list", name="characters")
+    @list_cmd.subcommand("characters")
     async def character_list(
             self,
             ctx: InteractionContext,
@@ -232,8 +232,7 @@ class CharacterCmd(naff.Extension):
         """List all characters with filters applied"""
         await ctx.defer()
         query = dict()
-        embed = naff.Embed(description="")
-        embed.color = naff.MaterialColors.LIGHT_BLUE
+        embed = naff.Embed(description="", color=naff.MaterialColors.LIGHT_BLUE)
 
         show_actors = True
         show_grade = True
@@ -307,8 +306,18 @@ class CharacterCmd(naff.Extension):
         if free is False:
             db_query.find({"actor": {"$ne": None}})
         character_list = await db_query.sort("+grade", "+name").to_list()
-        characters = [character.name for character in character_list]
+
+        characters = {character: character.name for character in character_list}
         results = fuzzy_autocomplete(query, characters)
+
+        async def get_actor(character):
+            await character.fetch_all_links()
+            if character.actor is None:
+                return "[FREE]"
+            return await character.actor.display_name(ctx.guild)
+
+        results = [{"name": f"{character.name} | {await get_actor(character)}", "value": character.name}
+                   for _, _, character in results]
         await ctx.send(results)
 
     @classmethod
@@ -336,23 +345,17 @@ class CharacterCmd(naff.Extension):
                 return await cls.get_role(guild, role_name)
             except naff.errors.Forbidden as e:
                 logger.warning(f"Could not get/create role `{role_name}` in {guild}: {e}")
-                print(e)
                 return None
 
         roles = {grade: await get_role(grade) for grade in all_grades}
         roles = {grade: role for grade, role in roles.items() if role is not None}
 
-        print(roles)
         for grade in to_remove:
-            print("REMOVE", grade)
             if grade in roles:
-                print("REMOVE+", grade)
                 await member.remove_role(roles[grade], "Automatically removed to match assigned characters")
 
         for grade in to_add:
-            print("ADD", grade)
             if grade in roles:
-                print("ADD+", grade)
                 await member.add_role(roles[grade], "Automatically added to match assigned characters")
 
     @staticmethod

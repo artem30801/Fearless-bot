@@ -46,6 +46,12 @@ class Actor(Document):
         else:
             return self.user_tag
 
+    async def display_name(self, guild: naff.Guild) -> str:
+        if user := await self.member(guild):
+            return user.display_name
+        else:
+            return self.user_tag
+
 
 class CharacterGrade(enum.IntEnum):
     main = 1
@@ -108,7 +114,11 @@ class Chapter(Document):
 
     @property
     def scenes(self):
-        return Scene.find({"chapter.$id": self.id})
+        return Scene.find({"chapter.$id": self.id}).sort("+number")
+
+    @property
+    def fullname(self):
+        return f"{self.number}. {self.name}"
 
 
 class Scene(Document):
@@ -149,6 +159,10 @@ class Scene(Document):
             return await fuzzy_find_obj(query, cls.in_chapter(chapter.id))
         except ValueError:
             raise InvalidArgument(f"Chapter with name'**{query}**' not found!")
+
+    @property
+    def fullname(self):
+        return f"{self.number}. {self.name}"
 
 
 def setup(bot):

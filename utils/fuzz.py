@@ -7,12 +7,8 @@ from copy import deepcopy
 #     return normalized_distance()
 
 
-def fuzzy_autocomplete(query: str, choices, flatten=True):
-    if not query.strip() and flatten:
-        return choices[:25]
+def fuzzy_autocomplete(query: str, choices):
     results = process.extract(query, choices, scorer=fuzz.WRatio, limit=25, score_cutoff=0)
-    if flatten:
-        return [value[0] for value in results]
     return results
 
 

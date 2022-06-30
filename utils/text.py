@@ -9,7 +9,7 @@ def _wr(wrap: bool):
 
 
 def _make_data_line(column_widths: list[int], wrap: list[bool], line: list[str], align: str) -> str:
-    return ' │ '.join(f'{_wr(ap)}{str(value): {align}{width}}{_wr(ap)}' for width, ap, value in zip(column_widths, wrap, line))
+    return '│'.join(f'{_wr(ap)} {str(value): {align}{width}} {_wr(ap)}' for width, ap, value in zip(column_widths, wrap, line))
 
 
 def make_table(rows: list[list[str]], wrap: list[bool]) -> list[str]:
@@ -21,4 +21,13 @@ def make_table(rows: list[list[str]], wrap: list[bool]) -> list[str]:
     return lines
 
 
-print(make_table([["hello", "world"], ["hey", "yoi"]], [True, False]))
+def format_entry(instance, highlight=None):
+    to_highlight = instance == highlight
+    style = "***" if to_highlight else "*"
+    return f"{instance.number}. {style}{instance.name}{style}"
+
+
+def pluralize(number: int, measure: str) -> str:
+    return f"{number} {measure}{'' if number == 1 else 's'}"
+
+# print(make_table([["hello", "world"], ["hey", "yoi"]], [True, False]))
