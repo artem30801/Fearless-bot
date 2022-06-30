@@ -22,12 +22,13 @@ def make_table(rows: list[list[str]], wrap: list[bool]) -> list[str]:
 
 
 def format_entry(instance, highlight=None):
-    to_highlight = instance == highlight
+    if highlight is not None:
+        to_highlight = instance.id == highlight.id
+    else:
+        to_highlight = False
     style = "***" if to_highlight else "*"
     return f"{instance.number}. {style}{instance.name}{style}"
 
 
 def pluralize(number: int, measure: str) -> str:
-    return f"{number} {measure}{'' if number == 1 else 's'}"
-
-# print(make_table([["hello", "world"], ["hey", "yoi"]], [True, False]))
+    return f"{number: <2} {measure}{'' if number == 1 else 's'}"

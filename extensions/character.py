@@ -265,8 +265,6 @@ class CharacterCmd(naff.Extension):
 
         characters = await Character.find(query).sort("+grade", "+name").to_list()
 
-        embed.description = embed.description.strip()
-
         async def make_row(character: Character):
             await character.fetch_all_links()
             row = [character.name]
@@ -292,9 +290,11 @@ class CharacterCmd(naff.Extension):
         characters_text = "\n".join(make_table(characters_rows, wrap_column))
 
         embed.add_field(
-            f"Characters [{len(characters)} total]", characters_text or "No characters available!"
+            f"Displaying {len(characters)} characters", characters_text or "No characters available!"
         )
 
+        embed.title = "Character list"
+        embed.description = embed.description.strip()
         await ctx.send(
             embed=embed,
             allowed_mentions=naff.AllowedMentions.none(),

@@ -4,11 +4,10 @@ from naff import slash_str_option, slash_int_option, slash_bool_option
 from naff import InteractionContext, AutocompleteContext, Permissions
 from naff.client.utils import TTLCache
 
-from utils.fuzz import fuzzy_autocomplete
 from utils.intractions import yes_no
 from utils.exceptions import InvalidArgument
 from utils.text import make_table, format_entry, pluralize
-from utils.commands import manage_cmd, list_cmd, info_cmd, generic_rename, generic_move
+from utils.commands import manage_cmd, list_cmd, info_cmd, generic_rename, generic_move, generic_autocomplete
 
 from extensions.character_models import Character, Scene, Chapter
 
@@ -18,6 +17,15 @@ chapter_cmd = manage_cmd.group("chapter")
 class ChapterCmd(naff.Extension):
     def __init__(self, client):
         self.last_chapter = TTLCache(ttl=60*60, soft_limit=100, hard_limit=250)
+
+    def set_last_chapter(self, ctx: naff.Context, chapter_obj: Chapter):
+        self.last_chapter[ctx.author.id] = chapter_obj.id
+
+    def clear_last_chapter(self, ctx: naff.Context):
+        self.last_chapter.pop(ctx.author.id, None)
+
+    def get_last_chapter(self, ctx: naff.Context):
+        return self.last_chapter.get(ctx.author.id, None)
 
     @chapter_cmd.subcommand("create")
     async def chapter_create(
@@ -29,7 +37,7 @@ class ChapterCmd(naff.Extension):
         await ctx.defer(ephemeral=True)
         chapter_obj = Chapter(name=name)
         await chapter_obj.insert()
-        self.last_chapter[ctx.author.id] = chapter_obj.id
+        self.set_last_chapter(ctx, chapter_obj)
 
         embed = naff.Embed(color=naff.MaterialColors.GREEN)
         embed.description = f"Created chapter '**{chapter_obj.name}**' (**#{chapter_obj.number}**)"
@@ -49,7 +57,7 @@ class ChapterCmd(naff.Extension):
         await chapter_obj.delete()
         async for scene in chapter_obj.scenes:
             await scene.delete()
-        self.last_chapter.pop(ctx.author.id, None)
+        self.clear_last_chapter(ctx)
 
         embed = naff.Embed(color=naff.MaterialColors.DEEP_ORANGE)
         embed.description = f"Removed chapter '**{chapter_obj.name}**'"
@@ -70,7 +78,7 @@ class ChapterCmd(naff.Extension):
         """Renames a chapter"""
         await ctx.defer(ephemeral=True)
         chapter_obj = await Chapter.fuzzy_find(chapter)
-        self.last_chapter[ctx.author.id] = chapter_obj.id
+        self.set_last_chapter(ctx, chapter_obj)
 
         embed = await generic_rename(chapter_obj, "chapter", new_name)
         embed.fields.append(await self.chapters_field(highlight=chapter_obj))
@@ -84,13 +92,13 @@ class ChapterCmd(naff.Extension):
     async def chapter_move(
             self,
             ctx: InteractionContext,
-            chapter: slash_str_option("chapter to rename", required=True, autocomplete=True),
+            chapter: slash_str_option("chapter to move", required=True, autocomplete=True),
             new_position: slash_int_option("new number for the chapter", required=True, min_value=1),
     ):
         """Changes a position (number) of the chapter"""
         await ctx.defer(ephemeral=True)
         chapter_obj = await Chapter.fuzzy_find(chapter)
-        self.last_chapter[ctx.author.id] = chapter_obj.id
+        self.set_last_chapter(ctx, chapter_obj)
 
         embed = await generic_move(chapter_obj, "chapter", new_position)
         embed.fields.append(await self.chapters_field(highlight=chapter_obj))
@@ -116,7 +124,7 @@ class ChapterCmd(naff.Extension):
                 row = [chapter.fullname]
                 if show_scenes_count:
                     scenes_count = await chapter.scenes.count()
-                    row.append(f"{scenes_count} scenes")
+                    row.append(pluralize(scenes_count, "scene"))
                 return row
 
             wrap_column = [True]
@@ -125,9 +133,11 @@ class ChapterCmd(naff.Extension):
 
             chapters_rows = [await make_row(chapter) for chapter in chapters]
             chapters_text = "\n".join(make_table(chapters_rows, wrap_column))
-            embed.add_field(name=f"Chapters [{len(chapters)} total]", value=chapters_text)
+            # embed.add_field(name=f"Chapters [{len(chapters)} total]", value=chapters_text)
+            embed.title = f"All chapters"
+            embed.description = chapters_text
         else:
-            embed.title = "All chapters and scenes:"
+            embed.title = "All chapters and scenes"
             for chapter in chapters:
                 scenes = await chapter.scenes.to_list()
                 scenes_text = "\n".join([f"{scene.number}. *{scene.name}*" for scene in scenes])
@@ -136,44 +146,16 @@ class ChapterCmd(naff.Extension):
         await ctx.send(embed=embed)
 
     async def chapter_autocomplete(self, ctx: AutocompleteContext, query: str, only_wth_scenes: bool = False):
-        query = query.strip()
-        db_query = Chapter.all()
+        db_query = Chapter.all().sort("+number")
         if only_wth_scenes:
             scenes = await Scene.all().to_list()
             chapter_ids = {scene.chapter.ref.id for scene in scenes}
             db_query = db_query.find({"_id": {"$in": list(chapter_ids)}})
 
-        results = []
-        try:
-            chapter_number = int(query)
-        except ValueError:
-            pass
-        else:
-            chapter = await deepcopy(db_query).find({"number": chapter_number}).first_or_none()
-            if chapter is None:
-                query = ""
-            else:
-                results = [chapter]
+        last_chapter_id = self.get_last_chapter(ctx)
 
-        if not results:
-            chapter_list = await deepcopy(db_query).sort("+number").to_list()
-            chapters = {chapter: chapter.name for chapter in chapter_list}
-            results = fuzzy_autocomplete(query, chapters)
-            results = [obj for _, _, obj in results]
-
-        if not query:
-            # If exists, we move last used chapter to the top of the list
-            last_chapter_id = self.last_chapter.get(ctx.author.id, None)
-            if last_chapter_id is not None:
-                chapter: Chapter = await deepcopy(db_query).find({"_id": last_chapter_id}).first_or_none()
-                if chapter is not None:
-                    results.remove(chapter)
-                    results.insert(0, chapter)
-        # else:
-        #     self.last_chapter.pop(ctx.author.id, None)
-
-        results = [{"name": f"{chapter.number}. {chapter.name}", "value": chapter.name}
-                   for chapter in results]
+        results = await generic_autocomplete(query, db_query, last_chapter_id, use_numbers=True)
+        results = [{"name": f"{chapter.number}. {chapter.name}", "value": chapter.name} for chapter in results]
         await ctx.send(results)
 
     @classmethod
@@ -181,7 +163,7 @@ class ChapterCmd(naff.Extension):
         chapters = await Chapter.all().sort("+number").to_list()
 
         field = naff.EmbedField(
-            name=f"Chapters [{len(chapters)} total]",
+            name=f"Chapters [{len(chapters)} total]:",
             value="\n".join([format_entry(chapter, highlight) for chapter in chapters])
         )
 

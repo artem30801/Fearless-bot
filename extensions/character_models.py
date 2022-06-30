@@ -4,7 +4,7 @@ import beanie
 from naff import InteractionContext
 from pydantic import Field, validator
 
-from utils.db import Document, validate_name, get_new_number, ensure_number_ordering, reshuffle_numbers
+from utils.db import Document, validate_name, reshuffle_numbers
 from utils.fuzz import fuzzy_find_obj
 from utils.exceptions import InvalidArgument
 
@@ -96,14 +96,9 @@ class Chapter(Document):
         if await cls.find(cls.name == self.name, cls.id != self.id).exists():
             raise InvalidArgument(f"Chapter '**{self.name}**' already exists!")
 
-        # validate number
-        self.number = await get_new_number(self, cls.all())
-        await reshuffle_numbers(cls.all(), self.number, self)
-
-    @beanie.after_event(beanie.Delete)
-    async def on_delete(self):
-        cls = self.__class__
-        await reshuffle_numbers(cls.all(), self.number-1)
+    @beanie.after_event([beanie.Insert, beanie.Replace, beanie.Delete])
+    async def reshuffle(self):
+        self.number = await reshuffle_numbers(self.__class__.all(), current_instance=self)
 
     @classmethod
     async def fuzzy_find(cls, query: str) -> "Chapter":
@@ -141,13 +136,9 @@ class Scene(Document):
         if await cls.find(cls.name == self.name, cls.id != self.id).exists():
             raise InvalidArgument(f"Scene '**{self.name}**' already exists!")
 
-        # validate number
-        self.number = await get_new_number(self, self.in_chapter(self.chapter_id))
-        await reshuffle_numbers(self.in_chapter(self.chapter_id), self.number, self)
-
-    @beanie.after_event(beanie.Delete)
-    async def on_delete(self):
-        await reshuffle_numbers(self.in_chapter(self.chapter_id), self.number-1)
+    @beanie.after_event([beanie.Insert, beanie.Replace, beanie.Delete])
+    async def reshuffle(self):
+        self.number = await reshuffle_numbers(self.in_chapter(self.chapter_id), current_instance=self)
 
     @classmethod
     def in_chapter(cls, chapter_id):

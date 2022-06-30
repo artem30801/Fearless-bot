@@ -1,4 +1,5 @@
 import os
+import time
 import logging
 import inspect
 import asyncio
@@ -72,6 +73,7 @@ def main():
     config = load_settings()
     if config.debug:
         jurigged.watch()
+        time.sleep(2)
 
     current_dir = Path(__file__).parent
 

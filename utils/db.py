@@ -27,24 +27,25 @@ async def get_new_number(instance, query):
     return number
 
 
-async def ensure_number_ordering(query: FindMany, number: int):
-    if await deepcopy(query).find({"number": number}).exists():
-        await deepcopy(query).find({"number": {"$gte": number}}).inc({"number": 1})
+async def reshuffle_numbers(query, current_instance=None, to_delete=False):
+    instances: list = await query.sort("+number").to_list()
+    return_number = None
+    if current_instance is not None:
+        # We remove current instance from the list and add it back on the *proper* position
+        new_instances = [instance for instance in instances if instance.id != current_instance.id]
+        if instances != new_instances:  # Don't add instance back if it wasn't in the list
+            instances = new_instances
+            current_number = current_instance.number-1 if current_instance.number is not None else len(instances)
+            instances.insert(current_number, current_instance)
 
-
-async def reshuffle_numbers(query, number, exclude_instance=None):
-    query = deepcopy(query).find({"number": {"$gte": number}})
-    if exclude_instance is not None:
-        query = deepcopy(query).find({"_id": {"$ne": exclude_instance.id}})
-
-    query = query.sort("+number")
-
-    async for instance in query:
-        print("BEFORE", instance)
-        number += 1
+    for number, instance in enumerate(instances, 1):
         instance.number = number
-        await instance.save(skip_actions=["validate_db"])
-        print("AFTER", instance)
+        await instance.save(skip_actions=["validate_db", "reshuffle"])
+
+        if current_instance is not None and instance.id == current_instance.id:
+            return_number = number
+
+    return return_number
 
 
 def validate_name(value: str):
