@@ -2,4 +2,5 @@ naff[orjson]
 beanie
 dynaconf
 rapidfuzz
+pytz
 jurigged

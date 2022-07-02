@@ -8,7 +8,7 @@ from copy import deepcopy
 
 
 def fuzzy_autocomplete(query: str, choices):
-    results = process.extract(query, choices, scorer=fuzz.WRatio, limit=25, score_cutoff=0)
+    results = process.extract(query, choices, scorer=fuzz.WRatio, limit=25, score_cutoff=50)
     return results
 
 

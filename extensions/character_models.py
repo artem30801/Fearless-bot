@@ -34,7 +34,7 @@ class Actor(Document):
             user = await ctx.bot.fetch_member(self.user_id, ctx.guild)
 
         if user is None:  # obj not found or not in guild
-            user = await ctx.bot.bot.fetch_user(self.user_id)
+            user = await ctx.bot.fetch_user(self.user_id)
         else:
             user = user.user  # obj is found, convert member to user
 

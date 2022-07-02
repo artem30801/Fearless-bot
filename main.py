@@ -5,6 +5,7 @@ import inspect
 import asyncio
 from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
+import traceback
 
 import naff
 import beanie
@@ -52,6 +53,7 @@ class Bot(naff.Client):
                 self.load_extension(extension)
             except Exception as e:
                 logger.error(f"Failed to load extension {extension}: {e}")
+                print(traceback.format_exc())
 
         if self.config.debug:
             self.load_extension("naff.ext.debug_extension")

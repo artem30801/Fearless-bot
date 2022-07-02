@@ -1,16 +1,22 @@
 import logging
+from typing import TYPE_CHECKING
+
 import naff
 from naff import SlashCommandChoice, subcommand, slash_str_option, slash_user_option, slash_bool_option, \
     slash_int_option
 from naff import InteractionContext, AutocompleteContext, Permissions
 
-from utils.text import make_table
+from utils.text import make_table, pluralize
 from utils.fuzz import fuzzy_autocomplete
 from utils.intractions import yes_no
 from utils.exceptions import InvalidArgument
 from utils.commands import manage_cmd, list_cmd, generic_rename
 
-from extensions.character_models import Actor, Character, CharacterGrade
+from extensions.character_models import Actor, Character, Scene, Chapter, CharacterGrade
+
+if TYPE_CHECKING:
+    from extensions.chapter import ChapterCmd
+    from extensions.scene import SceneCmd
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +146,7 @@ class CharacterCmd(naff.Extension):
                 await btn_ctx.edit_origin(embed=embed, components=[])
 
                 embed = naff.Embed(color=naff.MaterialColors.GREEN)
-                embed.description = f"Created character '**{character_obj.name}**' and assigned to {member.mention}! 🎉"
+                embed.description = f"Created *{character_obj.grade.name.title()}* character '**{character_obj.name}**' and assigned to {member.mention}! 🎉"
                 await ctx.channel.send(embed=embed)
             else:
                 embed = naff.Embed(description="Ok, aborted ;(", color=naff.MaterialColors.RED)
@@ -163,14 +169,14 @@ class CharacterCmd(naff.Extension):
 
                 if result:
                     color = naff.MaterialColors.INDIGO
-                    msg = f"Replaced {old_member_mention} with {member.mention} as an actor for character '**{character}**'"
+                    msg = f"Replaced {old_member_mention} with {member.mention} as an actor for *{character_obj.grade.name.title()}* character '**{character}**'"
                 else:
                     embed = naff.Embed(description="Ok, aborted ;(", color=naff.MaterialColors.RED)
                     await btn_ctx.edit_origin(embed=embed, components=[])
                     return
             else:
                 color = naff.MaterialColors.GREEN
-                msg = f"Assigned character '**{character_obj.name}**' to {member.mention}! 🎉"
+                msg = f"Assigned *{character_obj.grade.name.title()}* character '**{character_obj.name}**' to {member.mention}! 🎉"
 
             actor = await Actor.get_or_insert(member)
             character_obj.actor = actor
@@ -225,21 +231,67 @@ class CharacterCmd(naff.Extension):
             member: slash_user_option("actor to list characters for", required=False) = None,
             free_characters: slash_bool_option("whether to show only free characters or assigned",
                                                required=False) = None,
-            grade: slash_int_option("new grade for the character", required=False,
+            grade: slash_int_option("grade of the characters to show", required=False,
                                     choices=character_grades) = None,
+            chapter: slash_str_option("chapter to remove scene from", required=False, autocomplete=True) = None,
+            scene: slash_str_option("scene to remove", required=False, autocomplete=True) = None,
 
     ):
         """List all characters with filters applied"""
         await ctx.defer()
-        query = dict()
-        embed = naff.Embed(description="", color=naff.MaterialColors.LIGHT_BLUE)
+        embed = naff.Embed(color=naff.MaterialColors.LIGHT_BLUE)
+
+        chapter_obj = await Chapter.fuzzy_find(chapter) if chapter else None
+        if scene:
+            if chapter_obj:
+                scene_obj = await Scene.fuzzy_find(chapter_obj, scene)
+            else:
+                raise InvalidArgument("You must specify a chapter to filter characters by scene!")
+        else:
+            scene_obj = None
+
+        description, characters_text, characters = await self.make_character_list(
+            ctx=ctx,
+            member=member,
+            free_characters=free_characters,
+            grade=grade,
+            chapter=chapter_obj,
+            scene=scene_obj,
+        )
+        embed.add_field(
+            f"Displaying {pluralize(len(characters), 'character')}", characters_text or "No characters available!"
+        )
+
+        embed.title = "Character list"
+        embed.description = description
+        await ctx.send(embed=embed)
+
+    @character_list.autocomplete("chapter")
+    async def character_list_autocomplete_chapter(self, ctx: AutocompleteContext, chapter: str, **_):
+        return await self.chapter_ext.chapter_autocomplete(ctx, chapter, only_with_scenes=True)
+
+    @character_list.autocomplete("scene")
+    async def character_list_autocomplete_scene(self, ctx: AutocompleteContext, chapter: str, scene: str, **_):
+        return await self.scene_ext.scene_autocomplete(ctx, chapter, scene)
+
+    @classmethod
+    async def make_character_list(cls,
+                                  ctx: naff.Context,
+                                  member: naff.Member = None,
+                                  free_characters: bool | None = None,
+                                  grade: int | None = None,
+                                  chapter: Chapter | None = None,
+                                  scene: Scene | None = None,
+                                  ):
+        description_lines = []
+        db_query = Character.all()
 
         show_actors = True
         show_grade = True
 
         if grade:
-            embed.description += f"Showing only *{CharacterGrade(grade).name.title()}* characters\n"
-            query["grade"] = grade
+            description_lines.append(f"Showing only *{CharacterGrade(grade).name.title()}* characters")
+            db_query = db_query.find({"grade": grade})
             show_grade = False
 
         if free_characters is not None:
@@ -247,23 +299,35 @@ class CharacterCmd(naff.Extension):
                 raise InvalidArgument("You should not specify `member` and `free_characters` options at the same time!")
 
             if free_characters:
-                query["actor"] = None
-                embed.description += "Showing only **free** characters\n"
+                db_query = db_query.find({"actor": None})
+                description_lines.append("Showing only **free** characters")
                 show_actors = False
             else:
-                query["actor"] = {"$ne": None}
-                embed.description += "Showing only **assigned** characters\n"
+                db_query = db_query.find({"actor": {"$ne": None}})
+                description_lines.append("Showing only **assigned** characters")
 
         if member:
             actor = await Actor.get_by_member(member)
             if actor:
-                query["actor.$id"] = actor.id
-                embed.description += f"For actor: {member.mention}\n"
+                db_query = db_query.find({"actor.$id": actor.id})
+                description_lines.append(f"Showing characters with actor: {member.mention}")
                 show_actors = False
             else:
                 raise InvalidArgument("Sorry, this member is not assigned as an actor yet!")
 
-        characters = await Character.find(query).sort("+grade", "+name").to_list()
+        if chapter:
+            if scene:
+                description_lines.append(f"Showing only in scene '**{scene.name}**' of chapter '**{chapter.name}**'")
+                scenes = [scene]
+            else:
+                description_lines.append(f"Showing only in chapter '**{chapter.name}**'")
+                scenes = await Scene.in_chapter(chapter.id).to_list()
+            ids = []
+            for scene_obj in scenes:
+                ids.extend([link.ref.id for link in scene_obj.characters])
+            db_query.find({"_id": {"$in": list(set(ids))}})
+
+        characters = await db_query.sort("+grade", "+name").to_list()
 
         async def make_row(character: Character):
             await character.fetch_all_links()
@@ -289,22 +353,32 @@ class CharacterCmd(naff.Extension):
         characters_rows = [await make_row(character) for character in characters]
         characters_text = "\n".join(make_table(characters_rows, wrap_column))
 
-        embed.add_field(
-            f"Displaying {len(characters)} characters", characters_text or "No characters available!"
-        )
+        description = "\n".join(description_lines).strip()
+        return description, characters_text, characters
 
-        embed.title = "Character list"
-        embed.description = embed.description.strip()
-        await ctx.send(
-            embed=embed,
-            allowed_mentions=naff.AllowedMentions.none(),
-        )
+    @property
+    def chapter_ext(self) -> "ChapterCmd":
+        return self.bot.get_ext("ChapterCmd")  # type: ignore
+
+    @property
+    def scene_ext(self) -> "SceneCmd":
+        return self.bot.get_ext("SceneCmd")  # type: ignore
 
     @classmethod
-    async def character_autocomplete(cls, ctx: AutocompleteContext, query: str, free=None):
+    async def character_autocomplete(cls, ctx: AutocompleteContext, query: str, free=None,
+                                     exclude_scene=None, only_scene=None,
+                                     ):
         db_query = Character.all()
         if free is False:
             db_query.find({"actor": {"$ne": None}})
+
+        if exclude_scene:
+            ids = [link.ref.id for link in exclude_scene.characters]
+            db_query.find({"_id": {"$nin": ids}})
+        if only_scene:
+            ids = [link.ref.id for link in only_scene.characters]
+            db_query.find({"_id": {"$in": ids}})
+
         character_list = await db_query.sort("+grade", "+name").to_list()
 
         characters = {character: character.name for character in character_list}
@@ -352,11 +426,19 @@ class CharacterCmd(naff.Extension):
 
         for grade in to_remove:
             if grade in roles:
-                await member.remove_role(roles[grade], "Automatically removed to match assigned characters")
+                role = roles[grade]
+                try:
+                    await member.remove_role(role, "Automatically removed to match assigned characters")
+                except naff.errors.Forbidden as e:
+                    logger.warning(f"Could not remove role `{role}` from {member} in {guild}: {e}")
 
         for grade in to_add:
             if grade in roles:
-                await member.add_role(roles[grade], "Automatically added to match assigned characters")
+                role = roles[grade]
+                try:
+                    await member.add_role(roles[grade], "Automatically added to match assigned characters")
+                except naff.errors.Forbidden as e:
+                    logger.warning(f"Could not assign role `{role}` from {member} in {guild}: {e}")
 
     @staticmethod
     async def get_role(guild: naff.Guild, role_name: str) -> naff.Role:

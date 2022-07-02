@@ -1,4 +1,3 @@
-from copy import deepcopy
 import naff
 from naff import slash_str_option, slash_int_option, slash_bool_option
 from naff import InteractionContext, AutocompleteContext, Permissions
@@ -134,10 +133,10 @@ class ChapterCmd(naff.Extension):
             chapters_rows = [await make_row(chapter) for chapter in chapters]
             chapters_text = "\n".join(make_table(chapters_rows, wrap_column))
             # embed.add_field(name=f"Chapters [{len(chapters)} total]", value=chapters_text)
-            embed.title = f"All chapters"
+            embed.title = f"Chapters list"
             embed.description = chapters_text
         else:
-            embed.title = "All chapters and scenes"
+            embed.title = "Chapters and scenes list"
             for chapter in chapters:
                 scenes = await chapter.scenes.to_list()
                 scenes_text = "\n".join([f"{scene.number}. *{scene.name}*" for scene in scenes])
@@ -145,9 +144,9 @@ class ChapterCmd(naff.Extension):
 
         await ctx.send(embed=embed)
 
-    async def chapter_autocomplete(self, ctx: AutocompleteContext, query: str, only_wth_scenes: bool = False):
+    async def chapter_autocomplete(self, ctx: AutocompleteContext, query: str, only_with_scenes: bool = False):
         db_query = Chapter.all().sort("+number")
-        if only_wth_scenes:
+        if only_with_scenes:
             scenes = await Scene.all().to_list()
             chapter_ids = {scene.chapter.ref.id for scene in scenes}
             db_query = db_query.find({"_id": {"$in": list(chapter_ids)}})
