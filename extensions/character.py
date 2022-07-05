@@ -1,5 +1,6 @@
 import logging
 from typing import TYPE_CHECKING
+from bson import dbref
 
 import naff
 from naff import SlashCommandChoice, subcommand, slash_str_option, slash_user_option, slash_bool_option, \
@@ -10,7 +11,7 @@ from utils.text import make_table, pluralize
 from utils.fuzz import fuzzy_autocomplete
 from utils.intractions import yes_no
 from utils.exceptions import InvalidArgument
-from utils.commands import manage_cmd, list_cmd, generic_rename
+from utils.commands import manage_cmd, list_cmd, generic_rename, generic_autocomplete
 
 from extensions.character_models import Actor, Character, Scene, Chapter, CharacterGrade
 
@@ -59,9 +60,21 @@ class CharacterCmd(naff.Extension):
         """Removes a character"""
         await ctx.defer(ephemeral=True)
         character_obj = await Character.fuzzy_find(character)
-        actor = await character_obj.actor.fetch()
+        if character_obj.actor is not None:
+            actor = await character_obj.actor.fetch()
+        else:
+            actor = None
         await character_obj.delete()
-        await self.enforce_roles(ctx.guild, actor)
+
+        # remove ref to this character in scenes
+        scenes: list[Scene] = await Scene.find(
+            {"characters": {"$elemMatch": dbref.DBRef("Character", character_obj.id)}}
+        ).to_list()
+        for scene in scenes:
+            scene.characters = [link for link in scene.characters if link.ref.id != character_obj.id]
+            await scene.save()
+        if actor is not None:
+            await self.enforce_roles(ctx.guild, actor)
 
         embed = naff.Embed(color=naff.MaterialColors.DEEP_ORANGE)
         embed.description = f"Removed character '**{character_obj.name}**'!"
@@ -245,10 +258,13 @@ class CharacterCmd(naff.Extension):
         if scene:
             if chapter_obj:
                 scene_obj = await Scene.fuzzy_find(chapter_obj, scene)
+                self.scene_ext.set_last_scene(ctx, chapter_obj, scene_obj)
             else:
                 raise InvalidArgument("You must specify a chapter to filter characters by scene!")
         else:
             scene_obj = None
+            if chapter_obj:
+                self.chapter_ext.set_last_chapter(ctx, chapter_obj)
 
         description, characters_text, characters = await self.make_character_list(
             ctx=ctx,
@@ -272,7 +288,7 @@ class CharacterCmd(naff.Extension):
 
     @character_list.autocomplete("scene")
     async def character_list_autocomplete_scene(self, ctx: AutocompleteContext, chapter: str, scene: str, **_):
-        return await self.scene_ext.scene_autocomplete(ctx, chapter, scene)
+        return await self.scene_ext.scene_autocomplete(ctx, chapter, scene, only_wth_characters=True)
 
     @classmethod
     async def make_character_list(cls,
@@ -379,10 +395,8 @@ class CharacterCmd(naff.Extension):
             ids = [link.ref.id for link in only_scene.characters]
             db_query.find({"_id": {"$in": ids}})
 
-        character_list = await db_query.sort("+grade", "+name").to_list()
-
-        characters = {character: character.name for character in character_list}
-        results = fuzzy_autocomplete(query, characters)
+        db_query = db_query.sort("+grade", "+name")
+        results = await generic_autocomplete(query, db_query, use_numbers=False)
 
         async def get_actor(character):
             await character.fetch_all_links()
@@ -391,7 +405,8 @@ class CharacterCmd(naff.Extension):
             return await character.actor.display_name(ctx.guild)
 
         results = [{"name": f"{character.name} | {await get_actor(character)}", "value": character.name}
-                   for _, _, character in results]
+                   for character in results]
+
         await ctx.send(results)
 
     @classmethod

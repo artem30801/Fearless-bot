@@ -57,9 +57,12 @@ async def generic_autocomplete(query, db_query, last_id=None, use_numbers=False)
 
     if not results:
         instance_list = await deepcopy(db_query).to_list()
-        instance_dict = {instance: instance.name for instance in instance_list}
-        results = fuzzy_autocomplete(query, instance_dict)
-        results = [instance for _, _, instance in results]
+        if query:
+            instance_dict = {instance: instance.name for instance in instance_list}
+            results = fuzzy_autocomplete(query, instance_dict)
+            results = [instance for _, _, instance in results]
+        else:
+            results = instance_list
 
     if not query and last_id is not None:
         # If exists, we move last used instance to the top of the list
@@ -67,5 +70,4 @@ async def generic_autocomplete(query, db_query, last_id=None, use_numbers=False)
         if last_instance is not None:
             results = [result for result in results if result.id != last_instance.id]
             results.insert(0, last_instance)
-
     return results
