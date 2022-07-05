@@ -1,3 +1,6 @@
+from dateutil.relativedelta import relativedelta
+
+
 def format_lines(d: dict, delimiter="|"):
     max_len = max(map(len, d.keys()))
     lines = [f"`{name:<{max_len}}` {delimiter} {value}" for name, value in d.items()]
@@ -32,3 +35,19 @@ def format_entry(instance, highlight=None):
 
 def pluralize(number: int, measure: str) -> str:
     return f"{number: <2} {measure}{'' if number == 1 else 's'}"
+
+
+def format_delta(delta: relativedelta, positive=False, display_values_amount: int = 3):
+    d = {
+        "year": delta.years,
+        "month": delta.months,
+        "day": delta.days,
+        "hour": delta.hours,
+        "minute": delta.minutes,
+    }
+    values = [f"{abs(value) if positive else value} {key + 's' if value != 1 else key}"
+              for key, value in d.items() if value != 0]
+    if display_values_amount:
+        values = values[:display_values_amount]
+    result = ", ".join(values)
+    return result

@@ -16,6 +16,12 @@ class InvalidArgument(BotError):
     pass
 
 
+class NoChange(BotError):
+    def __init__(self, obj, *args):
+        super().__init__(obj, *args)
+        self.obj = obj
+
+
 async def send_error(ctx: naff.Context, msg: str):
     if not ctx.responded:
         embed = naff.Embed(color=naff.MaterialColors.RED)

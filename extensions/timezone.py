@@ -2,13 +2,67 @@ import re
 import naff
 import beanie
 import pytz
-from naff import subcommand, slash_str_option
+from dateutil.relativedelta import relativedelta
+
+from naff import SlashCommand, slash_str_option, slash_user_option
 from naff import InteractionContext, AutocompleteContext
 from collections import defaultdict
 from datetime import datetime
 
 from utils.fuzz import fuzzy_find_obj, fuzzy_autocomplete
-from utils.exceptions import InvalidArgument
+from utils.exceptions import InvalidArgument, NoChange
+from utils.db import Document
+from utils.text import make_table, format_delta
+from utils.commands import manage_cmd
+
+timezone_cmd = SlashCommand(name="timezone")
+time_cmd = SlashCommand(name="time")
+
+manage_timezone_cmd = manage_cmd.group("timezone")
+
+
+class UserTimezone(Document):
+    user_id: int
+    timezone: str
+
+    @property
+    def now(self):
+        return datetime.now(pytz.timezone(self.timezone))
+
+    @property
+    def abbreviation(self):
+        return self.now.strftime("%Z")
+
+    @property
+    def offset(self):
+        return TimezoneCmd.format_offset(self.now)
+
+    @property
+    def time_now(self):
+        return self.now.strftime("%H:%M")
+
+    @property
+    def date_now(self):
+        return self.now.strftime("%d.%m.%y")
+
+    @property
+    def weekday(self):
+        return self.now.strftime("%A")
+
+    @property
+    def full(self):
+        return TimezoneCmd.format_timezone(self.timezone)
+
+    @classmethod
+    async def from_member(cls, member: naff.Member, you=False) -> "UserTimezone":
+        user_timezone = await cls.find({"user_id": member.id}).first_or_none()
+        if not user_timezone:
+            if you:
+                raise InvalidArgument("You don't have a timezone set up!\n"
+                                      "Use `/timezone set` command to set your timezone info")
+            else:
+                raise InvalidArgument(f"{member.mention} doesn't have a time zone set up!")
+        return user_timezone
 
 
 class TimezoneCmd(naff.Extension):
@@ -39,7 +93,7 @@ class TimezoneCmd(naff.Extension):
         results = []
         for v1 in sign_variants:
             for v3 in minutes_variants:
-                results.append(v1+v2+v3)
+                results.append(v1 + v2 + v3)
         return results
 
     @classmethod
@@ -55,15 +109,24 @@ class TimezoneCmd(naff.Extension):
         offset = now.strftime("%z")
         return f"UTC{offset[:3]}:{offset[3:]}"
 
-    @staticmethod
-    def expand_results(fuzzy_results: list, data_dict: dict[str, list[str]], additional_score: int = 0) -> list[tuple[str, int]]:
-        results = []
-        for key, score, _ in fuzzy_results:
-            entries = [(name, score + additional_score) for name in data_dict[key]]
-            results.extend(entries)
-        return results
+    async def generic_timezone_set(self, member, timezone, you=False):
+        embed = naff.Embed()
 
-    @subcommand(base="timezone", name="set")
+        user_timezone, created = await self.set_user_timezone(member.id, timezone)
+        if created is not None:
+            embed.description = f"Set {'your' if you else member.mention} timezone as `{user_timezone.abbreviation}`"
+            if created:
+                embed.color = naff.MaterialColors.GREEN
+            else:
+                embed.color = naff.MaterialColors.INDIGO
+        else:
+            embed.description = f"{'Your' if you else member.mention} timezone is already set as `{user_timezone.abbreviation}`"
+            embed.color = naff.MaterialColors.PURPLE
+
+        embed.fields.append(self.get_user_field(member, user_timezone))
+        return embed
+
+    @timezone_cmd.subcommand("set")
     async def timezone_set(
             self,
             ctx: InteractionContext,
@@ -74,21 +137,165 @@ class TimezoneCmd(naff.Extension):
             ),
     ):
         """Set your timezone for all further commands"""
-        await ctx.send(timezone)
+        await ctx.defer(ephemeral=True)
+        embed = await self.generic_timezone_set(ctx.author, timezone, you=True)
+        await ctx.send(embed=embed)
 
     @timezone_set.autocomplete("timezone")
     async def timezone_set_autocomplete(self, ctx: AutocompleteContext, timezone: str, **_):
         return await self.timezone_autocomplete(ctx, timezone)
 
+    @manage_timezone_cmd.subcommand("set")
+    async def manage_timezone_set(
+            self,
+            ctx: InteractionContext,
+            member: slash_user_option("member to set timezone to", required=True),
+            timezone: slash_str_option(
+                "specify as: offset (+3, -3) or nearest country or principal city (Brussels, US) or abbreviation",
+                required=True,
+                autocomplete=True,
+            ),
+    ):
+        """Set timezone of the member"""
+        await ctx.defer(ephemeral=True)
+        embed = await self.generic_timezone_set(member, timezone, you=False)
+        await ctx.send(embed=embed)
+
+    @manage_timezone_set.autocomplete("timezone")
+    async def manage_timezone_set_autocomplete(self, ctx: AutocompleteContext, timezone: str, **_):
+        return await self.timezone_autocomplete(ctx, timezone)
+
+    async def generic_timezone_clear(self, member, you=False):
+        user_timezone = await UserTimezone.from_member(member, you=you)
+        await user_timezone.delete()
+        embed = naff.Embed(color=naff.MaterialColors.DEEP_ORANGE)
+        embed.description = f"Cleared {'your' if you else member.mention} timezone info!"
+        if you:
+            embed.description += f"\n Who are you exactly, again?"
+        return embed
+
+    @timezone_cmd.subcommand("clear")
+    async def timezone_clear(self, ctx: InteractionContext):
+        """Clear your timezone info"""
+        await ctx.defer(ephemeral=True)
+        embed = await self.generic_timezone_clear(ctx.author, you=True)
+        await ctx.send(embed=embed)
+
+    @manage_timezone_cmd.subcommand("clear")
+    async def manage_timezone_clear(
+            self,
+            ctx: InteractionContext,
+            member: slash_user_option("member to clear timezone from", required=True),
+    ):
+        """Clear timezone info of the member"""
+        await ctx.defer(ephemeral=True)
+        embed = await self.generic_timezone_clear(member, you=False)
+        await ctx.send(embed=embed)
+
+    @time_cmd.subcommand("me")
+    async def time_me(self, ctx: InteractionContext):
+        """Send information about your time"""
+        user_timezone = await UserTimezone.from_member(ctx.author, you=True)
+
+        embed = naff.Embed(color=naff.MaterialColors.BLUE)
+        embed.fields.append(self.get_user_field(ctx.author, user_timezone))
+        await ctx.send(embed=embed)
+
+    @time_cmd.subcommand("member")
+    async def time_member(
+            self,
+            ctx: InteractionContext,
+            member: slash_user_option("member to show time info about", required=True),
+    ):
+        """Send information about member's time"""
+        user_timezone = await UserTimezone.from_member(member, you=False)
+
+        embed = naff.Embed(color=naff.MaterialColors.BLUE)
+        embed.fields.append(self.get_user_field(member, user_timezone))
+        await ctx.send(embed=embed)
+
+    @time_cmd.subcommand("compare_member")
+    async def time_compare_member(
+            self,
+            ctx: InteractionContext,
+            member: slash_user_option("member to compare time info with", required=True),
+    ):
+        """Compare time information with member's time"""
+        if ctx.author == member:
+            raise InvalidArgument("Hahaha, stop. You're trying to compare youself to *yourself*?\n"
+                                  "Of course you're the best *you* out there, even in timezones!\n"
+                                  )
+
+        your_timezone = await UserTimezone.from_member(ctx.author, you=False)
+        user_timezone = await UserTimezone.from_member(member, you=False)
+
+        embed = naff.Embed(color=naff.MaterialColors.BLUE)
+        embed.fields.append(self.get_user_field(ctx.author, your_timezone))
+        embed.fields.append(self.get_user_field(member, user_timezone))
+
+        delta = relativedelta(user_timezone.now.replace(tzinfo=None), your_timezone.now.replace(tzinfo=None))
+        if not delta:
+            delta_text = f"No time difference between {ctx.author.mention} and {member.mention}!"
+        else:
+            delta_format = format_delta(delta, positive=True)
+            direction = "ahead" if abs(delta) != delta else "behind"
+            delta_text = f"{ctx.author.mention} time is *{delta_format}* **{direction}** {member.mention} time"
+
+        embed.add_field(name="Time difference", value=delta_text)
+
+        await ctx.send(embed=embed)
+
+
+    def get_user_field(self, member: naff.Member, user_timezone: UserTimezone):
+        lines = [
+            ["Timezone", user_timezone.abbreviation],
+            ["Time offset", user_timezone.offset],
+            ["Time now", user_timezone.time_now],
+            ["Weekday now", user_timezone.weekday],
+        ]
+
+        value = '\n'.join(make_table(lines, [True, True]))
+        field = naff.EmbedField(
+            name=f"{member.display_name}'s time info",
+            value=value,
+            inline=True,
+        )
+
+        return field
+
+    async def set_user_timezone(self, user_id: int, timezone_name: str):
+        timezone = self.get_timezone(timezone_name)
+        user_timezone = await UserTimezone.find({"user_id": user_id}).first_or_none()
+        if not user_timezone:
+            user_timezone = UserTimezone(user_id=user_id, timezone=timezone)
+            created = True
+        elif user_timezone.timezone == timezone:
+            created = None
+        else:
+            user_timezone.timezone = timezone
+            created = False
+
+        await user_timezone.save()
+        return user_timezone, created
+
     def get_timezone(self, query: str):
         query = query.strip()
-        if query in pytz.common_timezones:
+        if query in self.timezones:
             return query
         results = self.get_timezone_results(query)
         if results:
-            return results[0]
+            return results[0][0]
 
         raise InvalidArgument(f"Timezone {query} not found!")
+
+    @staticmethod
+    def expand_results(fuzzy_results: list, data_dict: dict[str, list[str]], additional_score: int = 0) -> list[
+        tuple[str, int]]:
+        results = []
+        for key, score, _ in fuzzy_results:
+            entries = [(name, score + additional_score) for name in data_dict[key]]
+            results.extend(entries)
+        return results
 
     def get_timezone_results(self, query: str):
         # Search by offsets and append all timezones with matching offsets to the results
@@ -133,38 +340,6 @@ class TimezoneCmd(naff.Extension):
         await ctx.send(results)
 
 
-abbreviations: defaultdict[str, list] = defaultdict(list)
-
-for name in pytz.common_timezones:
-    timezone = pytz.timezone(name)
-    now = datetime.now(timezone)
-
-    abbreviation = now.strftime("%Z")
-    abbreviations[abbreviation].append(name)
-
-print(abbreviations)
-print(len(abbreviations))
-
-# abbreviations: defaultdict[str, list] = defaultdict(list)
-# offsets: defaultdict[str, list] = defaultdict(list)
-#
-# for name in pytz.common_timezones:
-#     timezone = pytz.timezone(name)
-#     now = datetime.now(timezone)
-#     offset = Timezones.format_offset(now)
-#     abbreviation = now.strftime("%Z")
-#
-#     offsets[offset].append(name)
-#     abbreviations[abbreviation].append(name)
-
-# print(offsets)
-# print(abbreviations)
-#
-# results = Timezones.expand_results("+3", offsets)
-# results = [Timezones.format_timezone(name) + f" | {score}" for name, score in results]
-# print(results)
-# print(pytz.common_timezones)
-
 def setup(bot):
+    bot.add_model(UserTimezone)
     TimezoneCmd(bot)
-

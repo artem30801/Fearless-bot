@@ -1,19 +1,14 @@
-import enum
 import traceback
 import logging
 from typing import TYPE_CHECKING
-from datetime import datetime, timedelta, timezone
-from functools import partial
+from datetime import datetime, timedelta
 
 import naff
-from naff import client
 import pytz
 import beanie
-from naff import subcommand, slash_str_option, slash_channel_option, slash_bool_option
+from naff import slash_str_option, slash_channel_option, slash_bool_option
 from naff import InteractionContext, AutocompleteContext
-from collections import defaultdict
 
-from utils.fuzz import fuzzy_find_obj, fuzzy_autocomplete
 from utils.exceptions import InvalidArgument
 from utils.commands import manage_cmd
 from utils.db import Document
@@ -75,13 +70,12 @@ class InfoBarCmd(naff.Extension):
 
     @naff.listen()
     async def on_startup(self, *args, **kwargs):
-        print("STARTUP", args, kwargs)
         self.clock_bar_task = naff.Task(
             self._update_clock_bar_task,
             MinuteIntervalTrigger(minutes=self.clock_bar_minutes),
         )
         await self._refresh_clock_bars_cache()
-        await self._update_clock_bar_task()
+        # await self._update_clock_bar_task()
         self.clock_bar_task.start()
 
     async def _update_clock_bar_task(self):
@@ -98,6 +92,7 @@ class InfoBarCmd(naff.Extension):
         channel = await clock_bar.channel(self.bot)
         try:
             await channel.edit(name=self._get_clock_bar_name(clock_bar))
+        # todo except too many edits
         except Exception as e:
             logger.warning(
                 f"Could not edit channel {channel} name for clock bar {clock_bar} in {channel.guild}, removing it: {e}")
@@ -138,6 +133,7 @@ class InfoBarCmd(naff.Extension):
             show_timezone: slash_bool_option("whether to show timezone in the clock", required=False) = True,
             h24: slash_bool_option("whether to show time in 24 hour format", required=False) = True,
     ):
+        """Makes a name of the voice channel act like a clock bar, periodically updated with current time"""
         await ctx.defer(ephemeral=True)
         clock_bar = ClockBarChannel(
             guild_id=ctx.guild.id,
@@ -148,7 +144,6 @@ class InfoBarCmd(naff.Extension):
             show_timezone=show_timezone,
             h24=h24,
         )
-        """Makes a name of the voice channel act like a clock bar, periodically updated with current time"""
         await clock_bar.save()
         await self._update_clock_bar(clock_bar)
         await self._refresh_clock_bars_cache()
