@@ -1,10 +1,7 @@
 {
   "default": {
     "debug": true,
-    "debug_scope": 570257083040137237
-  },
-  "production": {
-    "debug": false,
+    "hot_reload": true,
     "debug_scope": null
   }
 }

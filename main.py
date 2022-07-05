@@ -1,5 +1,4 @@
 import os
-import time
 import logging
 import inspect
 import asyncio
@@ -73,9 +72,8 @@ class Bot(naff.Client):
 
 def main():
     config = load_settings()
-    if config.debug:
+    if config.hot_reload:
         jurigged.watch()
-        time.sleep(2)
 
     current_dir = Path(__file__).parent
 

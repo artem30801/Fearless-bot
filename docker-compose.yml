@@ -1,0 +1,37 @@
+version: '3.9'
+
+services:
+  fearless-bot:
+    container_name: fearless-bot
+    build: .
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - fearless-db
+    environment:
+      DYNACONF_DATABASE_ADDRESS: mongodb://fearless:${DB_PASS}@fearless-db:27017/
+      DYNACONF_DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DYNACONF_HOT_RELOAD: false
+
+  fearless-db:
+    container_name: fearless-db
+    image: mongo:5.0
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - 27017
+    volumes:
+      - "fearless_db_data:/data/db"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=fearless
+      - MONGO_INITDB_ROOT_PASSWORD=${DB_PASS}
+
+volumes:
+  fearless_db_data:
+    name: fearless-db-data
+
+networks:
+  default:
+    name: fearless-default

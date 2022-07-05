@@ -140,4 +140,4 @@ cython_debug/
 .idea/
 logs/
 config/.secrets.json
-config/.dynaenv
+.env

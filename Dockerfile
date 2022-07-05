@@ -12,7 +12,7 @@ ENV PYTHONUNBUFFERED 1
 RUN apt update
 RUN apt install -y git
 RUN pip install --upgrade pip
-COPY example/requirements.txt .
+COPY requirements.txt .
 RUN pip wheel --no-cache-dir --no-deps --wheel-dir /usr/src/app/wheels -r requirements.txt
 
 
@@ -38,11 +38,11 @@ RUN pip install --upgrade pip
 RUN pip install --no-cache /wheels/*
 
 # copy project
-COPY example/ $APP_HOME
-COPY nafftrack/ $APP_HOME/nafftrack
+COPY . $APP_HOME
 
 # chown all the files to the app user
 RUN chown -R app:app $APP_HOME
 
 # change to the app user
 USER app
+ENTRYPOINT python main.py
