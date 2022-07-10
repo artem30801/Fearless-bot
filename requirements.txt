@@ -1,5 +1,5 @@
-naff~=1.4.1
-orjson~=3.7.5
+naff~=1.5.0
+orjson~=3.7.7
 beanie~=1.11.6
 dynaconf~=3.1.9
 jurigged~=0.5.2

@@ -1,16 +1,22 @@
 import re
-import naff
-import beanie
-import pytz
-from dateutil.relativedelta import relativedelta
 
-from naff import SlashCommand, slash_str_option, slash_user_option
-from naff import InteractionContext, AutocompleteContext
-from collections import defaultdict
+import time
+import pytz
+from dateparser.date import DateDataParser
+from dateparser.search import search_dates
+
 from datetime import datetime
 
-from utils.fuzz import fuzzy_find_obj, fuzzy_autocomplete
-from utils.exceptions import InvalidArgument, NoChange
+import naff
+import beanie
+from dateutil.relativedelta import relativedelta
+
+from naff import SlashCommand, SlashCommandChoice, slash_str_option, slash_user_option, context_menu
+from naff import InteractionContext, AutocompleteContext
+from collections import defaultdict
+
+from utils.fuzz import fuzzy_autocomplete
+from utils.exceptions import InvalidArgument
 from utils.db import Document
 from utils.text import make_table, format_delta
 from utils.commands import manage_cmd
@@ -19,6 +25,7 @@ timezone_cmd = SlashCommand(name="timezone")
 time_cmd = SlashCommand(name="time")
 
 manage_timezone_cmd = manage_cmd.group("timezone")
+timezone_styles = [SlashCommandChoice(item.name, item.name) for item in naff.TimestampStyles]
 
 
 class UserTimezone(Document):
@@ -28,6 +35,10 @@ class UserTimezone(Document):
     @property
     def now(self):
         return datetime.now(pytz.timezone(self.timezone))
+
+    @property
+    def tz_info(self):
+        return pytz.timezone(self.timezone)
 
     @property
     def abbreviation(self):
@@ -67,6 +78,7 @@ class UserTimezone(Document):
 
 class TimezoneCmd(naff.Extension):
     def __init__(self, client):
+        # timezones
         self.timezones = pytz.all_timezones
 
         self.abbreviations: defaultdict[str, list] = defaultdict(list)
@@ -123,7 +135,7 @@ class TimezoneCmd(naff.Extension):
             embed.description = f"{'Your' if you else member.mention} timezone is already set as `{user_timezone.abbreviation}`"
             embed.color = naff.MaterialColors.PURPLE
 
-        embed.fields.append(self.get_user_field(member, user_timezone))
+        embed.fields.append(self.get_user_field(user_timezone))
         return embed
 
     @timezone_cmd.subcommand("set")
@@ -192,14 +204,19 @@ class TimezoneCmd(naff.Extension):
         embed = await self.generic_timezone_clear(member, you=False)
         await ctx.send(embed=embed)
 
+    async def generic_time_info(self, ctx: InteractionContext, member: naff.Member, user_timezone: UserTimezone):
+        embed = naff.Embed(color=naff.MaterialColors.BLUE)
+        embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
+        embed.description = f"For: {member.mention}"
+        embed.fields.append(self.get_user_field(user_timezone))
+        await ctx.send(embed=embed)
+
     @time_cmd.subcommand("me")
     async def time_me(self, ctx: InteractionContext):
         """Send information about your time"""
-        user_timezone = await UserTimezone.from_member(ctx.author, you=True)
-
-        embed = naff.Embed(color=naff.MaterialColors.BLUE)
-        embed.fields.append(self.get_user_field(ctx.author, user_timezone))
-        await ctx.send(embed=embed)
+        member: naff.Member = ctx.author
+        user_timezone = await UserTimezone.from_member(member, you=True)
+        await self.generic_time_info(ctx, member, user_timezone)
 
     @time_cmd.subcommand("member")
     async def time_member(
@@ -208,11 +225,9 @@ class TimezoneCmd(naff.Extension):
             member: slash_user_option("member to show time info about", required=True),
     ):
         """Send information about member's time"""
+        member: naff.Member
         user_timezone = await UserTimezone.from_member(member, you=False)
-
-        embed = naff.Embed(color=naff.MaterialColors.BLUE)
-        embed.fields.append(self.get_user_field(member, user_timezone))
-        await ctx.send(embed=embed)
+        await self.generic_time_info(ctx, member, user_timezone)
 
     @time_cmd.subcommand("compare_member")
     async def time_compare_member(
@@ -230,8 +245,8 @@ class TimezoneCmd(naff.Extension):
         user_timezone = await UserTimezone.from_member(member, you=False)
 
         embed = naff.Embed(color=naff.MaterialColors.BLUE)
-        embed.fields.append(self.get_user_field(ctx.author, your_timezone))
-        embed.fields.append(self.get_user_field(member, user_timezone))
+        embed.fields.append(self.get_user_field(your_timezone, member=ctx.author))
+        embed.fields.append(self.get_user_field(user_timezone, member=member))
 
         delta = relativedelta(user_timezone.now.replace(tzinfo=None), your_timezone.now.replace(tzinfo=None))
         if not delta:
@@ -245,8 +260,95 @@ class TimezoneCmd(naff.Extension):
 
         await ctx.send(embed=embed)
 
+    @time_cmd.subcommand("timestamps")
+    async def time_timestamps(self, ctx: InteractionContext,
+                              time: slash_str_option("time to convert into discord timestamp", required=True,
+                                                     autocomplete=True),
+                              style: slash_str_option("style of discord timestamp to use", required=False,
+                                                      choices=timezone_styles) = None,
+                              ):
+        """Converts specified time into discord built-in timestamp formats for you to copy-paste"""
+        d, t = await self.parse_time(ctx.author, time)
+        timestamp = naff.Timestamp.fromdatetime(d)
+        embed = naff.Embed(color=naff.MaterialColors.BLUE)
+        if style is None:
+            embed.description = f"Target time: {d.strftime('%c')}"
+            rows = [[style.name, timestamp.format(style), timestamp.format(style)] for style in naff.TimestampStyles]
+            embed.add_field(name="Timestamp variants:",
+                            value="\n".join(make_table(rows, [True, True, False]))
+                            )
+            embed.set_footer("Copy-paste text from the second column into your message textbox to send timestamp")
+        else:
+            # for mobile, mostly
+            style_obj = naff.TimestampStyles[style]
+            embed.description = f"`{timestamp.format(style_obj)}`"
+            embed.add_field(name=f"{style_obj.name} timestamp",
+                            value=f"{timestamp.format(style_obj)}\n"
+                            )
+            embed.set_footer(
+                "Copy-paste text from the embed (long tap on mobile) \ninto your message textbox to send timestamp")
 
-    def get_user_field(self, member: naff.Member, user_timezone: UserTimezone):
+        await ctx.send(embed=embed, ephemeral=True)
+
+    @time_timestamps.autocomplete("time")
+    async def time_timestamps_autocomplete(self, ctx: AutocompleteContext, time: str, **_):
+        return await self.time_autocomplete(ctx, time)
+
+    @context_menu(name="Detect datetimes", context_type=naff.CommandTypes.MESSAGE)
+    async def time_message_context(self, ctx: InteractionContext):
+        message: naff.Message = ctx.target
+        content = message.content.replace("*", "")
+
+        user_timezone = await UserTimezone.from_member(message.author)
+
+        msg_time = message.timestamp.astimezone(tz=user_timezone.tz_info)
+        base = datetime.fromtimestamp(time.mktime(msg_time.timetuple()))
+        settings = {"PREFER_DATES_FROM": "future", "RELATIVE_BASE": base}
+        try:
+            detected = search_dates(content, settings=settings)
+        except ValueError:
+            raise InvalidArgument("Cannot detect language of the message or it is unsupported!")
+
+        if detected is None:
+            raise InvalidArgument("No dates nor times were detected in the message!")
+
+        embed = naff.Embed(color=naff.MaterialColors.BLUE)
+        embed.set_author(name=message.author.display_name,
+                         icon_url=message.author.display_avatar.url,
+                         url=message.jump_url,
+                         )
+        embed.set_footer("Original message sent")
+        embed.timestamp = base
+
+        detected = [(chunk, naff.Timestamp.fromdatetime(t)) for chunk, t in detected]
+
+        for chunk, _ in detected:
+            pos = content.find(chunk)
+            content = content[:pos + len(chunk)] + "**" + content[pos + len(chunk):]
+            content = content[:pos] + "**" + content[pos:]
+        embed.description = f">>> {content}"
+
+        if len(detected) > 1:
+            rows = [[chunk,
+                     f"{t.format(naff.TimestampStyles.ShortDateTime)} ({t.format(naff.TimestampStyles.RelativeTime)})"]
+                    for chunk, t in detected]
+            detected_text = "\n".join(make_table(rows, [True, False]))
+        else:
+            t = detected[0][1]
+            detected_text = f"{t.format(naff.TimestampStyles.ShortDateTime)} ({t.format(naff.TimestampStyles.RelativeTime)})"
+
+        embed.add_field(name="Detected dates and times:", value=detected_text)
+
+        await ctx.send(embed=embed)
+
+    @context_menu(name="Get time info", context_type=naff.CommandTypes.USER)
+    async def time_user_context(self, ctx: InteractionContext):
+        member: naff.Member = ctx.target
+        user_timezone = await UserTimezone.from_member(member, you=False)
+        await self.generic_time_info(ctx, member, user_timezone)
+
+    @staticmethod
+    def get_user_field(user_timezone: UserTimezone, member: naff.Member | None = None):
         lines = [
             ["Timezone", user_timezone.abbreviation],
             ["Time offset", user_timezone.offset],
@@ -255,8 +357,9 @@ class TimezoneCmd(naff.Extension):
         ]
 
         value = '\n'.join(make_table(lines, [True, True]))
+        name = f"{member.display_name}'s time info" if member else "Time info"
         field = naff.EmbedField(
-            name=f"{member.display_name}'s time info",
+            name=name,
             value=value,
             inline=True,
         )
@@ -289,8 +392,11 @@ class TimezoneCmd(naff.Extension):
         raise InvalidArgument(f"Timezone {query} not found!")
 
     @staticmethod
-    def expand_results(fuzzy_results: list, data_dict: dict[str, list[str]], additional_score: int = 0) -> list[
-        tuple[str, int]]:
+    def expand_results(
+            fuzzy_results: list,
+            data_dict: dict[str, list[str]],
+            additional_score: int = 0,
+    ) -> list[tuple[str, int]]:
         results = []
         for key, score, _ in fuzzy_results:
             entries = [(name, score + additional_score) for name in data_dict[key]]
@@ -331,13 +437,49 @@ class TimezoneCmd(naff.Extension):
 
         return results
 
-    async def timezone_autocomplete(self, ctx: naff.Context, query: str):
+    async def timezone_autocomplete(self, ctx: AutocompleteContext, query: str):
         # Leave 25 best results
         results = self.get_timezone_results(query)
         results = results[:25]
         # Format output
         results = [{"name": self.format_timezone(name), "value": name} for name, score in results]
         await ctx.send(results)
+
+    @staticmethod
+    async def parse_time(member: naff.Member, query: str):
+        query = query.strip()
+        if not query:
+            raise InvalidArgument("Input time in any format including natural language (in five minutes, etc)")
+
+        settings = {"PREFER_DATES_FROM": "future"}
+        parser = DateDataParser(settings=settings)
+
+        data = parser.get_date_data(query)
+        d = data.date_obj
+
+        if d is not None:
+            if d.tzname() is None:
+                try:
+                    user_timezone = await UserTimezone.from_member(member, you=True)
+                except InvalidArgument:
+                    raise InvalidArgument("You don't have a timezone set up!\n"
+                                          "Use `/timezone set` command to set your timezone info "
+                                          "or insert timezone name into your query")
+                d = d.astimezone(tz=user_timezone.tz_info)
+
+            t = time.mktime(d.astimezone(None).timetuple())
+            return d, t
+        else:
+            raise InvalidArgument(f"Cannot interpret `{query}` as a valid time")
+
+    async def time_autocomplete(self, ctx: AutocompleteContext, query: str):
+        try:
+            d, t = await self.parse_time(ctx.author, query)
+        except InvalidArgument as e:
+            suggestion = {"name": str(e), "value": "0"}
+        else:
+            suggestion = {"name": f"Interpreted as: {d.strftime('%c %Z')}", "value": str(t)}
+        await ctx.send([suggestion])
 
 
 def setup(bot):
