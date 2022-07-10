@@ -298,6 +298,10 @@ class TimezoneCmd(naff.Extension):
     async def time_message_context(self, ctx: InteractionContext):
         message: naff.Message = ctx.target
         content = message.content.replace("*", "")
+        to_ignore = ["to", "on"]
+        to_detect = content
+        for word in to_ignore:
+            to_detect = to_detect.replace(word, "")
 
         user_timezone = await UserTimezone.from_member(message.author)
 
@@ -305,7 +309,7 @@ class TimezoneCmd(naff.Extension):
         base = datetime.fromtimestamp(time.mktime(msg_time.timetuple()))
         settings = {"PREFER_DATES_FROM": "future", "RELATIVE_BASE": base}
         try:
-            detected = search_dates(content, settings=settings)
+            detected = search_dates(to_detect, settings=settings)
         except ValueError:
             raise InvalidArgument("Cannot detect language of the message or it is unsupported!")
 
