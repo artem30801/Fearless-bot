@@ -305,8 +305,7 @@ class TimezoneCmd(naff.Extension):
 
         user_timezone = await UserTimezone.from_member(message.author)
 
-        msg_time = message.timestamp.astimezone(tz=user_timezone.tz_info)
-        base = datetime.fromtimestamp(time.mktime(msg_time.timetuple()))
+        base = datetime.fromtimestamp(time.mktime(message.timestamp.timetuple()))
         settings = {"PREFER_DATES_FROM": "future", "RELATIVE_BASE": base}
         try:
             detected = search_dates(to_detect, settings=settings)
@@ -322,9 +321,10 @@ class TimezoneCmd(naff.Extension):
                          url=message.jump_url,
                          )
         embed.set_footer("Original message sent")
-        embed.timestamp = base
+        embed.timestamp = message.timestamp
 
-        detected = [(chunk, naff.Timestamp.fromdatetime(t)) for chunk, t in detected]
+        detected = [(chunk, naff.Timestamp.fromdatetime(t).replace(tzinfo=user_timezone.tz_info))
+                    for chunk, t in detected]
 
         for chunk, _ in detected:
             pos = content.find(chunk)
