@@ -177,7 +177,8 @@ class TimezoneCmd(naff.Extension):
     async def manage_timezone_set_autocomplete(self, ctx: AutocompleteContext, timezone: str, **_):
         return await self.timezone_autocomplete(ctx, timezone)
 
-    async def generic_timezone_clear(self, member, you=False):
+    @staticmethod
+    async def generic_timezone_clear(member, you=False):
         user_timezone = await UserTimezone.from_member(member, you=you)
         await user_timezone.delete()
         embed = naff.Embed(color=naff.MaterialColors.DEEP_ORANGE)
@@ -297,13 +298,43 @@ class TimezoneCmd(naff.Extension):
     @context_menu(name="Detect datetimes", context_type=naff.CommandTypes.MESSAGE)
     async def time_message_context(self, ctx: InteractionContext):
         message: naff.Message = ctx.target
+        user_timezone = await UserTimezone.from_member(message.author)
+        embed = self.generic_datetime_detect(message, user_timezone)
+
+        await ctx.send(embed=embed)
+
+    @context_menu(name="Get time info", context_type=naff.CommandTypes.USER)
+    async def time_user_context(self, ctx: InteractionContext):
+        member: naff.Member = ctx.target
+        user_timezone = await UserTimezone.from_member(member, you=False)
+        await self.generic_time_info(ctx, member, user_timezone)
+
+    @naff.listen()
+    async def on_message_reaction_add(self, event: naff.events.MessageReactionAdd):
+        accepted = {"⌚", "⏰", "⏱️", "⏲️", "🕰️"}
+        if event.emoji.name not in accepted:
+            return
+
+        message = event.message
+        count = sum(reaction.count for reaction in message.reactions if reaction.emoji.name in accepted)
+        if count != 1:
+            return
+
+        try:
+            user_timezone = await UserTimezone.from_member(message.author)
+            embed = self.generic_datetime_detect(message, user_timezone, add_quote=False)
+        except InvalidArgument as e:
+            await message.add_reaction("🚫")
+        else:
+            await message.reply(embed=embed, allowed_mentions=naff.AllowedMentions.none())
+
+    @staticmethod
+    def generic_datetime_detect(message: naff.Message, user_timezone: UserTimezone, add_quote=True):
         content = message.content.replace("*", "")
         to_ignore = ["to", "on"]
         to_detect = content
         for word in to_ignore:
             to_detect = to_detect.replace(word, "")
-
-        user_timezone = await UserTimezone.from_member(message.author)
 
         base = datetime.fromtimestamp(time.mktime(message.timestamp.timetuple()))
         settings = {"PREFER_DATES_FROM": "future", "RELATIVE_BASE": base}
@@ -315,22 +346,24 @@ class TimezoneCmd(naff.Extension):
         if detected is None:
             raise InvalidArgument("No dates nor times were detected in the message!")
 
-        embed = naff.Embed(color=naff.MaterialColors.BLUE)
-        embed.set_author(name=message.author.display_name,
-                         icon_url=message.author.display_avatar.url,
-                         url=message.jump_url,
-                         )
-        embed.set_footer("Original message sent")
-        embed.timestamp = message.timestamp
-
         detected = [(chunk, naff.Timestamp.fromdatetime(t).replace(tzinfo=user_timezone.tz_info))
                     for chunk, t in detected]
 
-        for chunk, _ in detected:
-            pos = content.find(chunk)
-            content = content[:pos + len(chunk)] + "**" + content[pos + len(chunk):]
-            content = content[:pos] + "**" + content[pos:]
-        embed.description = f">>> {content}"
+        embed = naff.Embed(color=naff.MaterialColors.BLUE)
+        embed.timestamp = message.timestamp
+        embed.set_footer("Original message sent")
+
+        if add_quote:
+            embed.set_author(name=message.author.display_name,
+                             icon_url=message.author.display_avatar.url,
+                             url=message.jump_url,
+                             )
+
+            for chunk, _ in detected:
+                pos = content.find(chunk)
+                content = content[:pos + len(chunk)] + "**" + content[pos + len(chunk):]
+                content = content[:pos] + "**" + content[pos:]
+            embed.description = f">>> {content}"
 
         if len(detected) > 1:
             rows = [[chunk,
@@ -341,15 +374,9 @@ class TimezoneCmd(naff.Extension):
             t = detected[0][1]
             detected_text = f"{t.format(naff.TimestampStyles.ShortDateTime)} ({t.format(naff.TimestampStyles.RelativeTime)})"
 
+        # detected_text = f"For timezone: **{user_timezone.abbreviation} ({user_timezone.offset})**\n{detected_text}"
         embed.add_field(name="Detected dates and times:", value=detected_text)
-
-        await ctx.send(embed=embed)
-
-    @context_menu(name="Get time info", context_type=naff.CommandTypes.USER)
-    async def time_user_context(self, ctx: InteractionContext):
-        member: naff.Member = ctx.target
-        user_timezone = await UserTimezone.from_member(member, you=False)
-        await self.generic_time_info(ctx, member, user_timezone)
+        return embed
 
     @staticmethod
     def get_user_field(user_timezone: UserTimezone, member: naff.Member | None = None):
