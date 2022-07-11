@@ -1,6 +1,8 @@
 import re
 
 import time
+
+import dateparser
 import pytz
 from dateparser.date import DateDataParser
 from dateparser.search import search_dates
@@ -331,33 +333,51 @@ class TimezoneCmd(naff.Extension):
     @staticmethod
     def generic_datetime_detect(message: naff.Message, user_timezone: UserTimezone, add_quote=True):
         content = message.content.replace("*", "")
-        to_ignore = ["to", "on"]
         to_detect = content
-        for word in to_ignore:
-            to_detect = to_detect.replace(word, "")
 
         base = datetime.fromtimestamp(time.mktime(message.timestamp.timetuple()))
         settings = {"PREFER_DATES_FROM": "future", "RELATIVE_BASE": base}
+        languages = ["en"]
+
         try:
-            detected = search_dates(to_detect, settings=settings)
+            detected = search_dates(to_detect, settings=settings, languages=languages)
         except ValueError:
             raise InvalidArgument("Cannot detect language of the message or it is unsupported!")
 
         if detected is None:
-            raise InvalidArgument("No dates nor times were detected in the message!")
+            # sanity check because somtimes search_dates does not get datetime if it is not surrounded by anything
+            parsed = dateparser.parse(to_detect, settings=settings, languages=languages)
+            if parsed is None:
+                raise InvalidArgument("No dates nor times were detected in the message!")
+            detected = [(to_detect, parsed)]
+        else:
+            def process(chunk: str, t: datetime):
+                # sanity check because somtimes search_dates gets AM as months etc
+                parsed = dateparser.parse(chunk, settings=settings, languages=languages)
+                if parsed is not None and parsed != t:
+                    return chunk, parsed
+                return chunk, t
 
-        detected = [(chunk, naff.Timestamp.fromdatetime(t).replace(tzinfo=user_timezone.tz_info))
-                    for chunk, t in detected]
+            detected = [process(chunk, t) for chunk, t in detected]
+
+        def localize(t: datetime):
+            # sometimes user can explicitly specify time in the message
+            if t.tzinfo is None:
+                return user_timezone.tz_info.localize(t)
+            return t
+
+        detected = [(chunk, naff.Timestamp.fromdatetime(localize(t))) for chunk, t in detected]
 
         embed = naff.Embed(color=naff.MaterialColors.BLUE)
         embed.timestamp = message.timestamp
         embed.set_footer("Original message sent")
 
         if add_quote:
-            embed.set_author(name=message.author.display_name,
-                             icon_url=message.author.display_avatar.url,
-                             url=message.jump_url,
-                             )
+            embed.set_author(
+                name=message.author.display_name,
+                icon_url=message.author.display_avatar.url,
+                url=message.jump_url,
+            )
 
             for chunk, _ in detected:
                 pos = content.find(chunk)
@@ -373,8 +393,9 @@ class TimezoneCmd(naff.Extension):
         else:
             t = detected[0][1]
             detected_text = f"{t.format(naff.TimestampStyles.ShortDateTime)} ({t.format(naff.TimestampStyles.RelativeTime)})"
+            # detected_text += f"\n{t.strftime('%c %Z')}"
 
-        # detected_text = f"For timezone: **{user_timezone.abbreviation} ({user_timezone.offset})**\n{detected_text}"
+        detected_text = f"Original timezone: *{user_timezone.abbreviation} ({user_timezone.offset})*\n{detected_text}"
         embed.add_field(name="Detected dates and times:", value=detected_text)
         return embed
 
