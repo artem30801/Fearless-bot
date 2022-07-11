@@ -336,6 +336,7 @@ class TimezoneCmd(naff.Extension):
         to_detect = to_detect.strip()
 
         base = datetime.fromtimestamp(time.mktime(message.timestamp.timetuple()))
+        base = pytz.UTC.localize(base).astimezone(user_timezone.tz_info)
         settings = {"PREFER_DATES_FROM": "future", "RELATIVE_BASE": base}
         languages = ["en"]
 
@@ -363,7 +364,7 @@ class TimezoneCmd(naff.Extension):
         def localize(t: datetime):
             # sometimes user can explicitly specify time in the message
             if t.tzinfo is None:
-                return user_timezone.tz_info.localize(t)
+                return t.astimezone(user_timezone.tz_info)
             return t
 
         detected = [(chunk, naff.Timestamp.fromdatetime(localize(t))) for chunk, t in detected]
