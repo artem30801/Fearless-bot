@@ -336,8 +336,8 @@ class TimezoneCmd(naff.Extension):
         to_detect = to_detect.strip()
 
         base = datetime.fromtimestamp(time.mktime(message.timestamp.timetuple()))
-        base = pytz.UTC.localize(base).astimezone(None)
-        settings = {"PREFER_DATES_FROM": "future", "RELATIVE_BASE": base}
+        base = pytz.UTC.localize(base).astimezone(user_timezone.tz_info)
+        settings = {"PREFER_DATES_FROM": "future", "RELATIVE_BASE": base, "TIMEZONE": user_timezone.timezone, "RETURN_AS_TIMEZONE_AWARE": True}
         languages = ["en"]
 
         try:
