@@ -92,7 +92,9 @@ class InfoBarCmd(naff.Extension):
         channel = await clock_bar.channel(self.bot)
         try:
             await channel.edit(name=self._get_clock_bar_name(clock_bar))
-        # todo except too many edits
+        except naff.errors.TooManyChanges:
+            # rate limited
+            pass
         except Exception as e:
             logger.warning(
                 f"Could not edit channel {channel} name for clock bar {clock_bar} in {channel.guild}, removing it: {e}")
