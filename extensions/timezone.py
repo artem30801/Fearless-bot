@@ -20,7 +20,7 @@ from collections import defaultdict
 from utils.fuzz import fuzzy_autocomplete
 from utils.exceptions import InvalidArgument
 from utils.db import Document
-from utils.text import make_table, format_delta
+from utils.text import make_table, format_delta, clock_emojis
 from utils.commands import manage_cmd
 
 timezone_cmd = SlashCommand(name="timezone")
@@ -313,12 +313,10 @@ class TimezoneCmd(naff.Extension):
 
     @naff.listen()
     async def on_message_reaction_add(self, event: naff.events.MessageReactionAdd):
-        accepted = {"⌚", "⏰", "⏱️", "⏲️", "🕰️"}
-        if event.emoji.name not in accepted:
+        if event.emoji.name not in clock_emojis:
             return
-
         message = event.message
-        count = sum(reaction.count for reaction in message.reactions if reaction.emoji.name in accepted)
+        count = sum(reaction.count for reaction in message.reactions if reaction.emoji.name in clock_emojis)
         if count != 1:
             return
 
@@ -326,14 +324,16 @@ class TimezoneCmd(naff.Extension):
             user_timezone = await UserTimezone.from_member(message.author)
             embed = self.generic_datetime_detect(message, user_timezone, add_quote=False)
         except InvalidArgument as e:
-            await message.add_reaction("🚫")
+            embed = naff.Embed(color=naff.MaterialColors.RED)
+            embed.description = str(e)[:2000]
+            await message.reply(embed=embed, allowed_mentions=naff.AllowedMentions.none())
         else:
             await message.reply(embed=embed, allowed_mentions=naff.AllowedMentions.none())
 
     @staticmethod
     def generic_datetime_detect(message: naff.Message, user_timezone: UserTimezone, add_quote=True):
-        content = message.content.replace("*", "")
-        to_detect = content
+        to_detect = message.content.replace("*", "")
+        to_detect = to_detect.strip()
 
         base = datetime.fromtimestamp(time.mktime(message.timestamp.timetuple()))
         settings = {"PREFER_DATES_FROM": "future", "RELATIVE_BASE": base}
@@ -379,6 +379,7 @@ class TimezoneCmd(naff.Extension):
                 url=message.jump_url,
             )
 
+            content = to_detect
             for chunk, _ in detected:
                 pos = content.find(chunk)
                 content = content[:pos + len(chunk)] + "**" + content[pos + len(chunk):]

@@ -1,5 +1,7 @@
 from dateutil.relativedelta import relativedelta
 
+clock_emojis = {"⌚", "⏰", "⏱️", "⏲️", "🕰️"}
+
 
 def format_lines(d: dict, delimiter="|"):
     max_len = max(map(len, d.keys()))

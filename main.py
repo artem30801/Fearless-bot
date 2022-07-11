@@ -24,7 +24,7 @@ class Bot(naff.Client):
         self.config = config
 
         super().__init__(
-            intents=naff.Intents.DEFAULT,
+            intents=naff.Intents.DEFAULT | naff.Intents.GUILD_MESSAGE_CONTENT,
             sync_interactions=True,
             delete_unused_application_cmds=True,
             asyncio_debug=self.config.debug,
