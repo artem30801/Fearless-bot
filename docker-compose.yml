@@ -13,6 +13,7 @@ services:
       DYNACONF_DATABASE_ADDRESS: mongodb://fearless:${DB_PASS}@fearless-db:27017/
       DYNACONF_DISCORD_TOKEN: ${DISCORD_TOKEN}
       DYNACONF_HOT_RELOAD: false
+      DYNACONF_DEBUG: false
 
   fearless-db:
     container_name: fearless-db
