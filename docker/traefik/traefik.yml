@@ -1,0 +1,40 @@
+log:
+  level: WARN # INFO
+
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: true
+
+metrics:
+  prometheus:
+    buckets:
+      - 0.1
+      - 0.3
+      - 1.2
+      - 5.0
+
+accessLog:
+  filePath: /log/access.log
+  bufferingSize: 100
+  filters:
+    statusCodes:
+      - "200"
+      - "300-302"
+      - "400-499"
+    retryAttempts: true
+    minDuration: 10
+
+api:
+  dashboard: true
+
+entryPoints:
+  web:
+    address: ":54573"
+
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    swarmMode: false
+    network: fearless-default

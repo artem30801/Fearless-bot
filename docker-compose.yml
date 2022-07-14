@@ -26,8 +26,51 @@ services:
     volumes:
       - "fearless_db_data:/data/db"
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=fearless
-      - MONGO_INITDB_ROOT_PASSWORD=${DB_PASS}
+      MONGO_INITDB_ROOT_USERNAME: fearless
+      MONGO_INITDB_ROOT_PASSWORD: ${DB_PASS}
+
+  # Helper/monitoring containers:
+
+  fearless-traefik:
+    image: traefik:v2.8
+    container_name: fearless-traefik
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "54573:54573"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./docker/traefik/traefik.yml:/traefik.yml:ro
+      - ./docker/traefik/log/access.log:/log/access.log
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.traefik.service=api@internal
+      - traefik.http.routers.traefik.rule=PathPrefix(`/traefik`) || PathPrefix(`/api`)
+      - traefik.http.routers.traefik.entrypoints=web
+      - traefik.http.middlewares.stripprefix-traefik.stripprefix.prefixes=/traefik
+      - traefik.http.middlewares.auth.basicauth.users=$TRAEFIK_USERS
+      - traefik.http.routers.traefik.middlewares=auth, stripprefix-traefik
+
+  fearless-me:
+    container_name: fearless-me
+    image: mongo-express
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://fearless:${DB_PASS}@fearless-db:27017/
+      ME_CONFIG_BASICAUTH_USERNAME: ""
+      ME_CONFIG_OPTIONS_EDITORTHEME: material-palenight
+      ME_CONFIG_SITE_BASEURL: /mongo-express/
+    depends_on:
+      - fearless-db
+    expose:
+      - "8081"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.mongo-express.service=fearless-me-fearless
+      - traefik.http.routers.mongo-express.rule=PathPrefix(`/mongo-express`)
+      - traefik.http.routers.mongo-express.entrypoints=web
+      - traefik.http.routers.mongo-express.middlewares=auth
 
 volumes:
   fearless_db_data:
